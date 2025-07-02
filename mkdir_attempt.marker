@@ -1,0 +1,4 @@
+CWD: /app
+Output dir path to create: /app/test_output
+Dir exists before shutil.rmtree: True
+Is dir before shutil.rmtree: True
