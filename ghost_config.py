@@ -1,13 +1,15 @@
 import json
 import logging
 import os
-from cryptography.fernet import Fernet
+# from cryptography.fernet import Fernet # Replaced by CryptoProvider
+from ghost_crypto import CryptoProvider # Import the new CryptoProvider
 
 class GhostConfig:
     """
     Manages configuration settings for the GHOST Protocol DMPM application.
     Handles loading, saving, and encrypting configuration data, including API keys.
     Also sets up application-wide logging.
+    Uses CryptoProvider for encryption abstraction.
     """
     def __init__(self, config_file="config.json", key_file="secret.key"):
         """
@@ -20,78 +22,206 @@ class GhostConfig:
         self.config_file = config_file
         self.key_file = key_file
         self.config = {}
-        self.cipher_suite = None
-        self._load_key()
-        self._load_config()
-        self._setup_logging()
+        # self.cipher_suite = None # Replaced by self.crypto_provider
+        self.crypto_provider = None # Will be initialized in _load_or_generate_key_and_init_crypto
 
-    def _generate_key(self):
+        self._load_or_generate_key_and_init_crypto() # Initializes crypto_provider and its key
+        self._load_config() # Must be called after crypto_provider is initialized
+        self._setup_logging() # Sets up logging, potentially using config values
+
+        # Log the effective encryption mode
+        if self.crypto_provider:
+            logging.info(
+                f"GhostConfig initialized. Effective encryption mode: {self.crypto_provider.effective_mode}."
+            )
+        else: # Should not happen if _load_or_generate_key_and_init_crypto is correct
+            logging.error("CryptoProvider not initialized in GhostConfig.")
+
+
+    def _load_or_generate_key_and_init_crypto(self):
         """
-        Generates a new Fernet encryption key and saves it to the key_file.
-
-        Returns:
-            bytes: The generated encryption key.
+        Loads an existing key from key_file or generates a new one.
+        Initializes the CryptoProvider with this key and the configured/default encryption mode.
         """
-        key = Fernet.generate_key()
-        with open(self.key_file, "wb") as f:
-            f.write(key)
-        return key
+        key = None
+        encryption_mode_from_config = self.config.get("ENCRYPTION_MODE", "auto") # Check config early
 
-    def _load_key(self):
-        """Loads the encryption key from key_file or generates a new one if not found."""
+        if os.path.exists(self.key_file):
+            try:
+                with open(self.key_file, "rb") as f:
+                    key = f.read()
+                if not key: # File exists but is empty
+                    logging.warning(f"Key file {self.key_file} is empty. A new key will be generated.")
+                    key = None # Treat as if key file doesn't exist for generation logic
+            except Exception as e:
+                logging.error(f"Error reading key file {self.key_file}: {e}. A new key will be generated.")
+                key = None
+
+        # Initialize CryptoProvider. If key is None, CryptoProvider will generate one.
+        # Pass the encryption_mode from config if available, else default to "auto"
+        # This initial self.crypto_provider is temporary if key was None,
+        # as generate_key() below will create a new one with the proper key.
+        # This is a bit tricky because config isn't fully loaded yet to get ENCRYPTION_MODE.
+        # For now, let's assume "auto" for key generation, then respect config for operations.
+        # A better approach: CryptoProvider takes key=None and generates it internally if needed.
+
+        temp_provider_for_key_gen = CryptoProvider(mode="auto") # Mode for key gen itself is less critical
+
+        if key is None:
+            key = temp_provider_for_key_gen.generate_key() # Generate key using provider's logic
+            try:
+                with open(self.key_file, "wb") as f:
+                    f.write(key)
+                logging.info(f"New key generated and saved to {self.key_file}.")
+            except Exception as e:
+                logging.error(f"Error saving new key to {self.key_file}: {e}")
+                # Continue with the generated key in memory if saving fails
+
+        # Now, initialize the main crypto_provider with the definite key and desired mode
+        # We need to load ENCRYPTION_MODE from self.config, but self.config is loaded in _load_config,
+        # which needs crypto. This is a circular dependency.
+        # Simplification: For now, CryptoProvider in "auto" mode.
+        # ENCRYPTION_MODE from config will be logged but CryptoProvider decides internally.
+        # Or, we can do a preliminary partial load of config just for ENCRYPTION_MODE.
+
+        # Let's try to get ENCRYPTION_MODE from a potentially unencrypted config first,
+        # or use a default if it's the first run. This is tricky.
+        # The most robust way:
+        # 1. Load key if exists.
+        # 2. If key exists, init CryptoProvider with it (mode 'auto' for now).
+        # 3. Try to load config. If it has ENCRYPTION_MODE, re-init CryptoProvider if mode differs.
+        # 4. If key doesn't exist, generate key, save it, init CryptoProvider (mode 'auto').
+        # 5. Load config (which will be default or empty). Set ENCRYPTION_MODE if desired. Save config.
+
+        # Simpler path for now: CryptoProvider handles key generation if key=None.
+        # The mode for the *provider itself* will be based on config if available, else "auto".
+        # This means _load_config must be able to run *before* full crypto_provider finalization
+        # if we want ENCRYPTION_MODE to influence the choice between Fernet/Mock.
+
+        # Revised logic:
+        # 1. Determine initial key (load or generate if first time).
+        # 2. Create a temporary CryptoProvider with this key in 'auto' mode to try decryption.
+        # 3. Attempt to load and decrypt config using this temporary provider.
+        # 4. From loaded config, get ENCRYPTION_MODE.
+        # 5. Create the final self.crypto_provider using the key and the determined ENCRYPTION_MODE.
+
+        initial_key = None
         if os.path.exists(self.key_file):
             with open(self.key_file, "rb") as f:
-                key = f.read()
-        else:
-            key = self._generate_key()
-        self.cipher_suite = Fernet(key)
+                initial_key = f.read()
+
+        if not initial_key: # No key file or empty key file
+            # Need a provider to generate a key
+            temp_key_gen_provider = CryptoProvider(mode="auto") # Mode doesn't matter much for key gen
+            initial_key = temp_key_gen_provider.generate_key()
+            try:
+                with open(self.key_file, "wb") as f:
+                    f.write(initial_key)
+                logging.info(f"New key generated and saved to {self.key_file} by GhostConfig.")
+            except Exception as e:
+                logging.error(f"Error saving new key to {self.key_file}: {e}")
+
+        # At this point, 'initial_key' is definitely set.
+        # Now, we need to determine the ENCRYPTION_MODE.
+        # Temporarily load config as plaintext to find ENCRYPTION_MODE if it exists.
+        # This is a bit of a hack, as config is usually encrypted.
+        # A better way: CryptoProvider is always initialized, and _load_config uses it.
+        # The ENCRYPTION_MODE in config is more of a *preference* that CryptoProvider might consider
+        # if it's in "auto" mode, but availability of 'cryptography' lib is primary.
+
+        # Let's stick to CryptoProvider's internal logic for mode selection first.
+        # The ENCRYPTION_MODE in config can be a *request* for future runs.
+        self.crypto_provider = CryptoProvider(mode=self.config.get("ENCRYPTION_MODE", "auto"), key=initial_key)
+        # self.cipher_suite = self.crypto_provider # For compatibility if anything used old name
+                                                 # Better to update all uses to self.crypto_provider
 
     def _load_config(self):
         """
         Loads the configuration from the config_file.
-        If the file exists and contains data, it attempts to decrypt and load it.
+        If the file exists and contains data, it attempts to decrypt and load it using self.crypto_provider.
         If the file doesn't exist, is empty, or decryption fails,
         a default configuration is initialized and saved.
         Ensures the output directory specified in the config exists.
         """
+        if not self.crypto_provider:
+            # This should not happen if __init__ calls _load_or_generate_key_and_init_crypto first.
+            logging.error("CryptoProvider not available during _load_config. This is a bug.")
+            # Attempt a fallback initialization of crypto_provider here, though it's not ideal.
+            self._load_or_generate_key_and_init_crypto()
+            if not self.crypto_provider: # Still no provider
+                 raise RuntimeError("Failed to initialize CryptoProvider in GhostConfig.")
+
+
+        config_loaded_successfully = False
         if os.path.exists(self.config_file):
             with open(self.config_file, "rb") as f:
                 encrypted_data = f.read()
             if encrypted_data:
                 try:
-                    decrypted_data = self.cipher_suite.decrypt(encrypted_data)
+                    decrypted_data = self.crypto_provider.decrypt(encrypted_data)
                     self.config = json.loads(decrypted_data.decode())
+                    config_loaded_successfully = True
                 except Exception as e:
-                    logging.error(f"Error decrypting or loading config: {e}. Reinitializing config.")
-                    self.config = {"api_keys": {}, "mvno_list_file": "mvnos.txt", "keywords_file": "keywords.txt", "output_dir": "output"}
-                    self.save_config() # Save a fresh config if decryption fails
+                    logging.error(f"Error decrypting or loading config with {self.crypto_provider.effective_mode} mode: {e}. Reinitializing config.")
+                    # Don't save here, let it fall through to default config creation and save.
             else: # File is empty
-                self.config = {"api_keys": {}, "mvno_list_file": "mvnos.txt", "keywords_file": "keywords.txt", "output_dir": "output"}
-                self.save_config()
+                logging.info(f"Config file {self.config_file} is empty. Initializing default config.")
         else:
-            # Default configuration
-            self.config = {"api_keys": {}, "mvno_list_file": "mvnos.txt", "keywords_file": "keywords.txt", "output_dir": "output"}
-            self.save_config()
+            logging.info(f"Config file {self.config_file} not found. Initializing default config.")
+
+        if not config_loaded_successfully:
+            self.config = {
+                "api_keys": {},
+                "mvno_list_file": "mvnos.txt",
+                "keywords_file": "keywords.txt",
+                "output_dir": "output",
+                "ENCRYPTION_MODE": "auto" # Default encryption mode
+            }
+            self.save_config() # Save a fresh config if it was reinitialized or created
+
+        # After config is loaded (or defaults set), ensure ENCRYPTION_MODE is in self.config
+        if "ENCRYPTION_MODE" not in self.config:
+            self.config["ENCRYPTION_MODE"] = "auto" # Default if missing after load
+
+        # Update crypto_provider if loaded config's ENCRYPTION_MODE differs from initial 'auto' assumption
+        # and the provider isn't already in that specific mode due to library availability.
+        # This ensures the provider respects the config if possible.
+        desired_mode_from_config = self.config.get("ENCRYPTION_MODE", "auto")
+        if self.crypto_provider.mode != desired_mode_from_config.lower():
+            logging.info(f"Configuration specifies ENCRYPTION_MODE='{desired_mode_from_config}'. Re-evaluating CryptoProvider.")
+            # Re-initialize with the key we have and the mode from config.
+            current_key = self.crypto_provider.key
+            self.crypto_provider = CryptoProvider(mode=desired_mode_from_config, key=current_key)
+            logging.info(f"CryptoProvider re-initialized with mode '{self.crypto_provider.mode}', effective: '{self.crypto_provider.effective_mode}'.")
+
 
         # Ensure default output directory exists
-        output_dir = self.get("output_dir", "output")
+        output_dir = self.get("output_dir", "output") # Use self.get to access potentially just-loaded config
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
 
     def save_config(self):
         """
-        Encrypts the current configuration dictionary and saves it to the config_file.
+        Encrypts the current configuration dictionary using self.crypto_provider and saves it to the config_file.
         Logs success or error.
         """
+        if not self.crypto_provider:
+            logging.error("CryptoProvider not available. Cannot save configuration.")
+            return
+
         try:
+            # Ensure ENCRYPTION_MODE is in config before saving
+            if "ENCRYPTION_MODE" not in self.config:
+                 self.config["ENCRYPTION_MODE"] = self.crypto_provider.mode # Store the mode being used or requested
+
             data_to_encrypt = json.dumps(self.config).encode()
-            encrypted_data = self.cipher_suite.encrypt(data_to_encrypt)
+            encrypted_data = self.crypto_provider.encrypt(data_to_encrypt)
             with open(self.config_file, "wb") as f:
                 f.write(encrypted_data)
-            logging.info("Configuration saved successfully.")
+            logging.info(f"Configuration saved successfully using {self.crypto_provider.effective_mode} mode.")
         except Exception as e:
-            logging.error(f"Error saving configuration: {e}")
+            logging.error(f"Error saving configuration with {self.crypto_provider.effective_mode} mode: {e}")
 
     def get(self, key, default=None):
         """

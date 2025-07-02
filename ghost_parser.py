@@ -3,41 +3,59 @@ import os
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone # Added for temporal weighting
-# import spacy # Moved into _initialize_nlp to prevent import-time crash if spacy is broken
+from datetime import datetime, timezone
 
-from ghost_config import GhostConfig # Assuming ghost_config.py is in the same directory or PYTHONPATH
+# Removed spacy import and related comments
+
+from ghost_config import GhostConfig
 
 # Basic sentiment keyword lists (very simplistic)
-POSITIVE_WORDS = {"easy", "simple", "quick", "no problem", "anonymous", "privacy", "recommended", "good", "great", "love", "best", "straightforward", "hassle-free", "no id", "no ssn", "cash"}
-NEGATIVE_WORDS = {"difficult", "hard", "problem", "issues", "requires id", "ssn needed", "credit check", "avoid", "bad", "terrible", "warning", "strict", "verification"}
+POSITIVE_WORDS = {"easy", "simple", "quick", "no problem", "anonymous", "privacy", "recommended", "good", "great", "love", "best", "straightforward", "hassle-free", "no id", "no ssn", "cash", "minimal requirements"}
+NEGATIVE_WORDS = {"difficult", "hard", "problem", "issues", "requires id", "ssn needed", "credit check", "avoid", "bad", "terrible", "warning", "strict", "verification", "mandatory id", "full kyc"}
 
-# Source credibility weights
+# Source credibility weights - ensured this is present and used
 SOURCE_CREDIBILITY_WEIGHTS = {
-    "official": 1.0,  # High credibility for official MVNO sites
-    "news": 0.8,      # Reputable news sources
-    "forum": 0.6,     # Forums, discussions (e.g., Reddit, XDA)
-    "blog": 0.7,      # Tech blogs, review sites
-    "unknown": 0.5    # Default for unidentified sources
+    "official": 1.0,  # High credibility for official MVNO sites (e.g., mvno.com/policy)
+    "news": 0.8,      # Reputable news sources, tech journals
+    "forum": 0.6,     # Forums, discussions (e.g., Reddit, XDA) - user experiences
+    "blog": 0.7,      # Tech blogs, review sites - often well-researched
+    "unknown": 0.4    # Default for unidentified or very generic sources (lowered weight)
 }
 
-# More specific policy keywords
-LENIENT_POLICY_KEYWORDS = {
-    "no id required": 5, "no ssn": 5, "anonymous activation": 4, "cash payment accepted": 3,
-    "minimal personal information": 3, "privacy focused": 2, "prepaid no contract": 1,
-    "no credit check": 2, "easy setup": 1, "pay with crypto": 5, "burner phone friendly": 3
+# Enhanced Policy Keywords & Regex Patterns
+# Structure: "keyword_group_name": {"regex": r"...", "score": X, "type": "lenient/stringent"}
+# Regexes should be case-insensitive where appropriate (use re.IGNORECASE flag)
+# More specific patterns get higher absolute scores.
+ADVANCED_POLICY_PATTERNS = {
+    # Lenient Patterns
+    "no_id_strong": {"regex": r"\bno id (required|needed|necessary)\b|\banonymous activation\b|id free", "score": 7, "type": "lenient"},
+    "no_id_moderate": {"regex": r"\bminimal id\b|\beasy verification\b|no personal info", "score": 4, "type": "lenient"},
+    "no_ssn_strong": {"regex": r"\bno ssn (required|needed)\b|ssn free", "score": 7, "type": "lenient"},
+    "cash_payment": {"regex": r"\bcash payment(s)? (accepted|ok|allowed)\b|\bpay with cash\b", "score": 5, "type": "lenient"},
+    "crypto_payment": {"regex": r"\b(bitcoin|crypto|btc|eth|xmr) payment(s)? (accepted|ok)\b|\bpay with crypto\b", "score": 6, "type": "lenient"},
+    "privacy_focused": {"regex": r"\bprivacy focused\b|\brespects privacy\b|privacy first", "score": 3, "type": "lenient"},
+    "no_credit_check": {"regex": r"\bno credit check\b", "score": 3, "type": "lenient"},
+    "burner_phone_friendly": {"regex": r"\bburner phone friendly\b|good for burner(s)?\b", "score": 4, "type": "lenient"},
+    "prepaid_no_contract": {"regex": r"\bprepaid no contract\b|\bpay as you go\b", "score": 1, "type": "lenient"}, # Lower impact as it's common
+
+    # Stringent Patterns
+    "id_mandatory_strong": {"regex": r"\b(id|identification|driver'?s license|passport) (is )?(required|mandatory|needed|must provide|essential)\b|\bfull kyc\b", "score": -7, "type": "stringent"},
+    "id_photo": {"regex": r"\bphoto id\b|\bphotographic identification\b", "score": -6, "type": "stringent"},
+    "ssn_mandatory_strong": {"regex": r"\bssn (is )?(required|mandatory|needed)\b", "score": -7, "type": "stringent"},
+    "credit_check_required": {"regex": r"\bcredit check (is )?(required|performed|mandatory)\b", "score": -5, "type": "stringent"},
+    "address_verification": {"regex": r"\b(address verification|proof of address)\b", "score": -4, "type": "stringent"},
+    "extensive_registration": {"regex": r"\b(extensive|lengthy|detailed) registration process\b", "score": -3, "type": "stringent"},
+    "data_collection_heavy": {"regex": r"\bcollects (significant|extensive|lots of) personal data\b", "score": -3, "type": "stringent"},
+    "not_anonymous": {"regex": r"\bnot anonymous\b|\bcannot be used anonymously\b", "score": -4, "type": "stringent"},
 }
-STRINGENT_POLICY_KEYWORDS = {
-    "id verification mandatory": -5, "ssn required": -5, "credit check needed": -4,
-    "account registration extensive": -3, "must provide address": -2, "strict kyc": -4,
-    "photo id": -3, "not anonymous": -2
-}
+
 
 class GhostParser:
     """
     Processes raw data collected by GhostCrawler to extract actionable intelligence
     regarding MVNO leniency. It assigns a "leniency score" to each MVNO based on
-    keyword analysis and performs basic sentiment analysis on text snippets.
+    advanced regex pattern matching, source credibility, and temporal decay.
+    Spacy/NLP based entity extraction has been removed.
     """
     def __init__(self, config_manager: GhostConfig):
         """
@@ -50,73 +68,10 @@ class GhostParser:
         self.config_manager = config_manager
         self.logger = self.config_manager.get_logger("GhostParser")
         self.output_dir = self.config_manager.get("output_dir", "output")
-        self.nlp = self._initialize_nlp()
+        # self.nlp = self._initialize_nlp() # NLP initialization removed
 
-    def _initialize_nlp(self):
-        """
-        Initializes and loads the spaCy NLP model.
-        """
-        self.logger.warning(
-            "spaCy NLP model loading is currently disabled due to environment issues. "
-            "Parser will proceed without NLP enhancements."
-        )
-        return None
-        # try:
-        #     import spacy # Import spacy here
-        #     nlp = spacy.load("en_core_web_sm")
-        #     self.logger.info("spaCy NLP model 'en_core_web_sm' loaded successfully.")
-        #     return nlp
-        # except OSError: # pragma: no cover
-        #     self.logger.error(
-        #         "spaCy 'en_core_web_sm' model not found. "
-        #         "Please download it by running: python -m spacy download en_core_web_sm"
-        #     )
-        #     return None
-        # except ModuleNotFoundError: # pragma: no cover
-        #     self.logger.error("spacy library not found. Please install it.")
-        #     return None
-        # except Exception as e: # pragma: no cover
-        #     self.logger.error(f"An unexpected error occurred while loading the spaCy model: {e}")
-        #     return None
-
-    def _extract_policy_entities(self, text: str) -> list[str]:
-        """
-        Extracts potential policy-related entities from text using the spaCy NLP model.
-        For now, focuses on noun chunks and some generic entities.
-
-        Args:
-            text (str): The text to analyze.
-
-        Returns:
-            list[str]: A list of extracted entity texts.
-        """
-        if not self.nlp or not text:
-            return []
-
-        doc = self.nlp(text)
-        entities = []
-
-        # Add noun chunks as potential entities
-        for chunk in doc.noun_chunks:
-            entities.append(chunk.text.lower())
-
-        # Add specific named entities (can be expanded)
-        for ent in doc.ents:
-            if ent.label_ in {"ORG", "PRODUCT", "LAW", "PERCENT", "MONEY", "QUANTITY"}:
-                 entities.append(ent.text.lower())
-
-        # Simple keyword enhancement for policy related terms (example)
-        # This can be made more sophisticated
-        policy_related_keywords = [
-            "id", "ssn", "passport", "license", "verification", "check",
-            "payment", "cash", "credit card", "crypto", "activation", "sim card"
-        ]
-        for token in doc:
-            if token.lemma_.lower() in policy_related_keywords and token.lemma_.lower() not in entities:
-                entities.append(token.lemma_.lower())
-
-        # Deduplicate
-        return list(set(entities))
+    # _initialize_nlp method is now fully removed.
+    # _extract_policy_entities method (NLP-based) is now fully removed.
 
     def _get_source_credibility(self, source_url: str | None) -> float:
         """

@@ -2,15 +2,18 @@ import json
 import os
 import time
 import npyscreen
-from cryptography.fernet import Fernet # For encryption
+# from cryptography.fernet import Fernet # Replaced by CryptoProvider via GhostConfig
 from ghost_config import GhostConfig
+# ghost_crypto is not directly imported here, accessed via config_manager.crypto_provider
+
+# Header for mock-encrypted files
+MOCK_ENCRYPTION_HEADER = b"--GHOST_MOCK_ENCRYPTED_CONTENT_BASE64--\n"
 
 class GhostReporter:
     """
     Generates reports from parsed MVNO data.
-    This includes creating a Top N leniency report, saving reports as encrypted JSON,
-    (placeholder for PDF reports), and displaying reports in a terminal UI (TUI)
-    using npyscreen.
+    This includes creating a Top N leniency report, saving reports as "encrypted" JSON
+    (using CryptoProvider from GhostConfig), and displaying reports in a TUI.
     """
     def __init__(self, config_manager: GhostConfig):
         """
@@ -18,48 +21,38 @@ class GhostReporter:
 
         Args:
             config_manager (GhostConfig): An instance of GhostConfig for accessing
-                                          configuration settings and the encryption cipher.
+                                          configuration settings and the CryptoProvider.
         """
         self.config_manager = config_manager
         self.logger = self.config_manager.get_logger("GhostReporter")
         self.output_dir = self.config_manager.get("output_dir", "output")
 
-        # For encryption of reports - use a dedicated key or the main app key
-        # For simplicity, let's try to use the main app's key logic from GhostConfig
-        # If GhostConfig's cipher_suite is directly accessible and suitable:
-        if hasattr(config_manager, 'cipher_suite') and config_manager.cipher_suite:
-            self.cipher_suite = config_manager.cipher_suite
+        # Use the CryptoProvider from GhostConfig directly
+        if not hasattr(config_manager, 'crypto_provider') or not config_manager.crypto_provider:
+            self.logger.error("CryptoProvider not found in GhostConfig. Reporting encryption will fail.")
+            # Fallback or error handling could be more robust, e.g. creating a dummy provider
+            self.crypto_provider = None
         else:
-            # Fallback: generate/load a dedicated report key if GhostConfig doesn't expose its cipher
-            # This part would mirror GhostConfig's key handling if needed separately
-            self.report_key_file = os.path.join(self.output_dir, "reporter_secret.key")
-            self._load_report_key()
+            self.crypto_provider = config_manager.crypto_provider
+            self.logger.info(f"GhostReporter initialized with CryptoProvider in '{self.crypto_provider.effective_mode}' mode.")
+
+        # The _load_report_key method is no longer needed as we use the config_manager's crypto_provider
+        # self.report_key_file = os.path.join(self.output_dir, "reporter_secret.key") # No longer needed
+        # self._load_report_key() # No longer needed
 
         self.reports_subdir = os.path.join(self.output_dir, "reports")
         if not os.path.exists(self.reports_subdir):
             os.makedirs(self.reports_subdir)
             self.logger.info(f"Created reports subdirectory: {self.reports_subdir}")
 
-    def _load_report_key(self):
-        """
-        Loads an existing Fernet encryption key from `self.report_key_file` or
-        generates a new one if the file doesn't exist. This key is used for
-        encrypting reports if the main `GhostConfig` cipher is not used/available.
-        This method is primarily a fallback if `GhostConfig` doesn't directly expose its cipher.
-        """
-        try:
-            if os.path.exists(self.report_key_file):
-                with open(self.report_key_file, "rb") as f:
-                    key = f.read()
-            else: # pragma: no cover (usually covered by GhostConfig providing a cipher)
-                key = Fernet.generate_key()
-                with open(self.report_key_file, "wb") as f:
-                    f.write(key)
-                self.logger.info(f"Generated new report encryption key: {self.report_key_file}")
-            self.cipher_suite = Fernet(key)
-        except Exception as e: # pragma: no cover
-            self.logger.error(f"Error managing report encryption key: {e}")
-            self.cipher_suite = None # Encryption will fail
+    # def _load_report_key(self): # This method is removed
+    #     """
+    #     DEPRECATED: Loads an existing Fernet encryption key from `self.report_key_file` or
+    #     generates a new one if the file doesn't exist. This key is used for
+    #     encrypting reports if the main `GhostConfig` cipher is not used/available.
+    #     This method is primarily a fallback if `GhostConfig` doesn't directly expose its cipher.
+    #     """
+    #     pass # Logic moved to GhostConfig and CryptoProvider
 
     def _load_parsed_data(self, parsed_data_filepath: str) -> dict | None:
         """

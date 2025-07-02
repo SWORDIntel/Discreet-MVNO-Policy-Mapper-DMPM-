@@ -47,3 +47,5 @@ ENV/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+.ghost_setup_complete
