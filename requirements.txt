@@ -3,5 +3,6 @@ npyscreen
 google-api-python-client
 requests
 beautifulsoup4
+spacy
 # lxml # Alternative HTML parser
 # reportlab # Add if/when implementing PDF report generation

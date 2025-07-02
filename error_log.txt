@@ -1,0 +1,9 @@
+FATAL ERROR in __main__: NameError: name 'os' is not defined
+Traceback (most recent call last):
+  File "/app/main.py", line 97, in <module>
+    raw_results_filepath = crawler.run_crawling_cycle(num_results_per_query=1) # Keep num_results_per_query low for tests
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/ghost_crawler.py", line 237, in run_crawling_cycle
+    filename = os.path.join(self.output_dir, f"raw_search_results_{timestamp}.json")
+               ^^
+NameError: name 'os' is not defined. Did you forget to import 'os'
