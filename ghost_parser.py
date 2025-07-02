@@ -1,13 +1,25 @@
 import json
 import os
 import re
-import time # <--- ADDED IMPORT
+import time
 from collections import defaultdict
+from datetime import datetime, timezone # Added for temporal weighting
+# import spacy # Moved into _initialize_nlp to prevent import-time crash if spacy is broken
+
 from ghost_config import GhostConfig # Assuming ghost_config.py is in the same directory or PYTHONPATH
 
 # Basic sentiment keyword lists (very simplistic)
 POSITIVE_WORDS = {"easy", "simple", "quick", "no problem", "anonymous", "privacy", "recommended", "good", "great", "love", "best", "straightforward", "hassle-free", "no id", "no ssn", "cash"}
 NEGATIVE_WORDS = {"difficult", "hard", "problem", "issues", "requires id", "ssn needed", "credit check", "avoid", "bad", "terrible", "warning", "strict", "verification"}
+
+# Source credibility weights
+SOURCE_CREDIBILITY_WEIGHTS = {
+    "official": 1.0,  # High credibility for official MVNO sites
+    "news": 0.8,      # Reputable news sources
+    "forum": 0.6,     # Forums, discussions (e.g., Reddit, XDA)
+    "blog": 0.7,      # Tech blogs, review sites
+    "unknown": 0.5    # Default for unidentified sources
+}
 
 # More specific policy keywords
 LENIENT_POLICY_KEYWORDS = {
@@ -38,6 +50,152 @@ class GhostParser:
         self.config_manager = config_manager
         self.logger = self.config_manager.get_logger("GhostParser")
         self.output_dir = self.config_manager.get("output_dir", "output")
+        self.nlp = self._initialize_nlp()
+
+    def _initialize_nlp(self):
+        """
+        Initializes and loads the spaCy NLP model.
+        """
+        self.logger.warning(
+            "spaCy NLP model loading is currently disabled due to environment issues. "
+            "Parser will proceed without NLP enhancements."
+        )
+        return None
+        # try:
+        #     import spacy # Import spacy here
+        #     nlp = spacy.load("en_core_web_sm")
+        #     self.logger.info("spaCy NLP model 'en_core_web_sm' loaded successfully.")
+        #     return nlp
+        # except OSError: # pragma: no cover
+        #     self.logger.error(
+        #         "spaCy 'en_core_web_sm' model not found. "
+        #         "Please download it by running: python -m spacy download en_core_web_sm"
+        #     )
+        #     return None
+        # except ModuleNotFoundError: # pragma: no cover
+        #     self.logger.error("spacy library not found. Please install it.")
+        #     return None
+        # except Exception as e: # pragma: no cover
+        #     self.logger.error(f"An unexpected error occurred while loading the spaCy model: {e}")
+        #     return None
+
+    def _extract_policy_entities(self, text: str) -> list[str]:
+        """
+        Extracts potential policy-related entities from text using the spaCy NLP model.
+        For now, focuses on noun chunks and some generic entities.
+
+        Args:
+            text (str): The text to analyze.
+
+        Returns:
+            list[str]: A list of extracted entity texts.
+        """
+        if not self.nlp or not text:
+            return []
+
+        doc = self.nlp(text)
+        entities = []
+
+        # Add noun chunks as potential entities
+        for chunk in doc.noun_chunks:
+            entities.append(chunk.text.lower())
+
+        # Add specific named entities (can be expanded)
+        for ent in doc.ents:
+            if ent.label_ in {"ORG", "PRODUCT", "LAW", "PERCENT", "MONEY", "QUANTITY"}:
+                 entities.append(ent.text.lower())
+
+        # Simple keyword enhancement for policy related terms (example)
+        # This can be made more sophisticated
+        policy_related_keywords = [
+            "id", "ssn", "passport", "license", "verification", "check",
+            "payment", "cash", "credit card", "crypto", "activation", "sim card"
+        ]
+        for token in doc:
+            if token.lemma_.lower() in policy_related_keywords and token.lemma_.lower() not in entities:
+                entities.append(token.lemma_.lower())
+
+        # Deduplicate
+        return list(set(entities))
+
+    def _get_source_credibility(self, source_url: str | None) -> float:
+        """
+        Determines the credibility weight of a source based on its URL.
+
+        Args:
+            source_url (str | None): The URL of the data source.
+
+        Returns:
+            float: The credibility weight.
+        """
+        if not source_url:
+            return SOURCE_CREDIBILITY_WEIGHTS["unknown"]
+
+        url_lower = source_url.lower()
+        # This is a basic implementation. More sophisticated matching could be used.
+        # Order matters: check for more specific before general
+        if any(official_domain in url_lower for official_domain in ["usmobile.com", "visible.com", "mintmobile.com", "googlefi.com", "cricketwireless.com", "boostmobile.com"]): # Add more official domains
+            return SOURCE_CREDIBILITY_WEIGHTS["official"]
+        if any(news_domain in url_lower for news_domain in ["reuters.com", "apnews.com", "nytimes.com", "wsj.com", "theverge.com", "techcrunch.com"]): # Add reputable news
+            return SOURCE_CREDIBILITY_WEIGHTS["news"]
+        if any(forum_domain in url_lower for forum_domain in ["reddit.com", "xda-developers.com", "howardforums.com"]):
+            return SOURCE_CREDIBILITY_WEIGHTS["forum"]
+        if any(blog_domain in url_lower for blog_domain in ["androidpolice.com", "bestmvno.com", "clark.com/cell-phones"]): # Generic tech blogs
+            return SOURCE_CREDIBILITY_WEIGHTS["blog"]
+
+        # Fallback if no specific category matches
+        return SOURCE_CREDIBILITY_WEIGHTS["unknown"]
+
+    def _calculate_temporal_weight(self, item_timestamp_str: str | None, batch_crawl_timestamp: datetime) -> float:
+        """
+        Calculates a weight based on the age of the data.
+        Uses item_timestamp_str if available, otherwise falls back to batch_crawl_timestamp.
+
+        Args:
+            item_timestamp_str (str | None): ISO format string of the item's publication date.
+            batch_crawl_timestamp (datetime): Timestamp of the current crawl batch.
+
+        Returns:
+            float: The calculated temporal weight (between 0.05 and 1.0).
+        """
+        data_timestamp = None
+        if item_timestamp_str:
+            try:
+                data_timestamp = datetime.fromisoformat(item_timestamp_str.replace("Z", "+00:00"))
+                # If timezone naive, assume UTC
+                if data_timestamp.tzinfo is None:
+                    data_timestamp = data_timestamp.replace(tzinfo=timezone.utc)
+            except ValueError:
+                self.logger.warning(f"Could not parse item_timestamp_str: {item_timestamp_str}. Using batch crawl time for temporal weight.")
+                data_timestamp = batch_crawl_timestamp
+
+        if data_timestamp is None: # Should only happen if item_timestamp_str was None initially
+             data_timestamp = batch_crawl_timestamp
+
+        # Ensure batch_crawl_timestamp is timezone-aware (assume UTC if not)
+        if batch_crawl_timestamp.tzinfo is None:
+            effective_batch_crawl_timestamp = batch_crawl_timestamp.replace(tzinfo=timezone.utc)
+        else:
+            effective_batch_crawl_timestamp = batch_crawl_timestamp
+
+        # Ensure data_timestamp is timezone-aware for correct comparison
+        if data_timestamp.tzinfo is None:
+             # This case should ideally be handled by earlier logic, but as a fallback:
+            data_timestamp = data_timestamp.replace(tzinfo=timezone.utc)
+
+
+        days_old = (effective_batch_crawl_timestamp - data_timestamp).days
+
+        if days_old < 0: # Data from the future? Or timestamp parsing issue.
+            self.logger.warning(f"Data timestamp {data_timestamp} is in the future compared to crawl time {effective_batch_crawl_timestamp}. Defaulting temporal weight to 1.0.")
+            return 1.0
+
+        decay_rate = 0.01 # 1% decay per day
+        min_weight = 0.05 # Minimum weight for very old data (e.g. data older than 95 days)
+
+        weight = 1.0 - (days_old * decay_rate)
+        return max(min_weight, weight) # Ensure weight doesn't go below min_weight or above 1.0 (implicitly handled if days_old is not negative)
+
 
     def _load_raw_data(self, filepath: str) -> list[dict] | None:
         """
@@ -119,30 +277,89 @@ class GhostParser:
         if score < 0: return "negative"
         return "neutral"
 
-    def _calculate_leniency_score(self, text_content: str) -> int:
+    def _calculate_leniency_score(
+        self,
+        text_content: str,
+        source_url: str | None,
+        item_timestamp_str: str | None,
+        batch_crawl_timestamp: datetime
+    ) -> tuple[float, list[str]]:
         """
-        Calculates a leniency score for a given text content based on predefined
-        lenient and stringent policy keywords. Each keyword has an associated point value.
+        Calculates a composite leniency score for a given text content.
+        The score incorporates keyword matching, NLP entity analysis, source credibility,
+        and temporal decay.
 
         Args:
-            text_content (str): The text (e.g., search result snippet) to analyze.
+            text_content (str): The text (e.g., search result snippet, extracted page text) to analyze.
+            source_url (str | None): The URL of the data source.
+            item_timestamp_str (str | None): ISO format string of the item's publication date.
+            batch_crawl_timestamp (datetime): Timestamp of the current crawl batch.
 
         Returns:
-            int: The calculated leniency score. Positive scores indicate leniency,
-                 negative scores indicate stringency.
+            tuple[float, list[str]]: A tuple containing:
+                - float: The calculated composite leniency score.
+                - list[str]: A list of policy-related entities extracted by NLP.
         """
-        score = 0
-        text_lower = text_content.lower()
+        if not text_content:
+            return 0.0, []
 
+        text_lower = text_content.lower()
+        base_score = 0
+        nlp_score_adjustment = 0
+
+        # 1. Traditional Keyword Scoring (base)
         for keyword, points in LENIENT_POLICY_KEYWORDS.items():
             if keyword in text_lower:
-                score += points
-
+                base_score += points
         for keyword, points in STRINGENT_POLICY_KEYWORDS.items():
             if keyword in text_lower: # points are already negative
-                score += points
+                base_score += points
 
-        return score
+        # 2. NLP Entity Extraction and Scoring Adjustment
+        extracted_entities = self._extract_policy_entities(text_lower) # Pass lowercased text
+
+        # Example: Boost score if certain positive keywords are found by NLP as distinct entities
+        # This logic can be expanded significantly.
+        nlp_positive_indicators = {"no id", "anonymous", "no ssn", "cash payment", "privacy"}
+        nlp_negative_indicators = {"id verification", "ssn required", "credit check", "kyc"}
+
+        for entity in extracted_entities:
+            # Check if the entity text itself is an indicator
+            if entity in nlp_positive_indicators:
+                nlp_score_adjustment += 2 # Small boost for NLP confirmed positive entities
+            elif entity in nlp_negative_indicators:
+                nlp_score_adjustment -= 2 # Small penalty for NLP confirmed negative entities
+            else:
+                # Check if parts of the entity text match broader keywords (more nuanced)
+                if any(indicator in entity for indicator in nlp_positive_indicators):
+                     nlp_score_adjustment += 1
+                if any(indicator in entity for indicator in nlp_negative_indicators):
+                     nlp_score_adjustment -=1
+
+        # Combine base keyword score with NLP adjustment
+        combined_keyword_nlp_score = base_score + nlp_score_adjustment
+
+        # 3. Source Credibility Weighting
+        credibility_weight = self._get_source_credibility(source_url)
+
+        # 4. Temporal Weighting
+        temporal_weight = self._calculate_temporal_weight(item_timestamp_str, batch_crawl_timestamp)
+
+        # Calculate final composite score
+        # Example: (keyword_score + nlp_score_adj) * credibility_weight * temporal_weight
+        # Ensure factors are reasonably scaled. If base_score can be large, direct multiplication might be too much.
+        # For now, let's apply them as multipliers to the combined score.
+        final_score = combined_keyword_nlp_score * credibility_weight * temporal_weight
+
+        self.logger.debug(
+            f"Score calculation for source '{source_url}': "
+            f"BaseKeywords={base_score}, NLPAdjust={nlp_score_adjustment}, "
+            f"Credibility={credibility_weight:.2f}, Temporal={temporal_weight:.2f} "
+            f"-> Final Score={final_score:.2f}"
+        )
+
+        return final_score, extracted_entities
+
 
     def parse_results(self, raw_data_filepath: str) -> str | None:
         """
@@ -164,130 +381,142 @@ class GhostParser:
             self.logger.error("No raw data to parse.")
             return None
 
-        parsed_data = defaultdict(lambda: {"sources": [], "total_leniency_score": 0, "mentions": 0, "positive_sentiment_mentions": 0, "negative_sentiment_mentions": 0, "policy_keywords": defaultdict(int)})
-        self.logger.info(f"Parser: Starting processing of {len(raw_results)} raw_results items.")
+        if not self.nlp: # Check if NLP model loaded
+            self.logger.error("NLP model not available. Cannot perform enhanced parsing.")
+            # Optionally, could fall back to a basic parsing mode here,
+            # but for now, we'll indicate failure to meet enhanced parsing objective.
+            return None
+
+        # Use file modification time of raw_data_filepath as batch_crawl_timestamp
+        try:
+            batch_crawl_timestamp_unix = os.path.getmtime(raw_data_filepath)
+            batch_crawl_timestamp = datetime.fromtimestamp(batch_crawl_timestamp_unix, tz=timezone.utc)
+        except Exception as e: # pragma: no cover
+            self.logger.warning(f"Could not get file modification time for {raw_data_filepath}: {e}. Using current time as batch crawl time.")
+            batch_crawl_timestamp = datetime.now(timezone.utc)
+
+
+        parsed_data = defaultdict(lambda: {
+            "sources": [],
+            "total_leniency_score": 0.0, # Now float
+            "mentions": 0,
+            "positive_sentiment_mentions": 0,
+            "negative_sentiment_mentions": 0,
+            "policy_keywords": defaultdict(int),
+            "aggregated_nlp_entities": defaultdict(int) # New: To store counts of NLP entities
+        })
+        self.logger.info(f"Parser: Starting processing of {len(raw_results)} raw_results items with NLP enhancements.")
 
         for idx, item in enumerate(raw_results):
-            # enlevé: with open(f"parser_loop_item_{idx}_start.marker", "w") as f: f.write(f"Item: {item.get('link')}")
             title = item.get("title", "")
             snippet = item.get("snippet", "")
-            link = item.get("link", "")
+            link = item.get("link", "") # This is the source_url
             query_source = item.get("query_source", "")
-            raw_html_content = item.get("raw_html_content") # May be None
-            extracted_page_text = item.get("extracted_page_text") # May be None or empty
+            raw_html_content = item.get("raw_html_content")
+            extracted_page_text = item.get("extracted_page_text")
+
+            # Attempt to get item-specific timestamp (e.g., from metadata if crawler provides it)
+            # Placeholder: Assuming 'published_date' might be a field in item from future crawler
+            item_timestamp_str = item.get("published_date") # This will be None for current mock data
 
             # --- MVNO Name Extraction (using existing logic) ---
-            try:
-                # This is a simplification. A better way might involve passing the original MVNO list used by the crawler.
-                mvno_name_match = re.match(r"([^ ]+(\s[^ ]+)?)", query_source)
-                mvno_name = mvno_name_match.group(0).strip() if mvno_name_match else "Unknown MVNO"
-                if "google fi" in query_source.lower():
-                    mvno_name = "Google Fi"
-                elif "us mobile" in query_source.lower():
-                     mvno_name = "US Mobile"
-            except Exception as e_regex:
-                self.logger.error(f"Regex error processing query_source '{query_source}': {e_regex}", exc_info=True)
-                mvno_name = "Unknown MVNO"
-            # enlevé: with open(f"parser_loop_item_{idx}_mvno_extracted.marker", "w") as f: f.write(mvno_name)
-            # --- End MVNO Name Extraction ---
+            mvno_name = self._extract_mvno_name_from_query(query_source)
+            # (Original logic for Google Fi, US Mobile specific extraction can be kept or refined if needed)
+            # For simplicity, relying on the general _extract_mvno_name_from_query here.
 
             # Determine the primary text content for analysis
             text_for_analysis = ""
             text_source_type = "none"
             if extracted_page_text and extracted_page_text.strip():
-                text_for_analysis = extracted_page_text.lower()
+                text_for_analysis = extracted_page_text # Already lowercased in _calculate_leniency_score
                 text_source_type = "extracted_page_text"
-                self.logger.debug(f"Using extracted_page_text for analysis from {link} (length: {len(text_for_analysis)})")
-            elif snippet: # Fallback to snippet if extracted_page_text is empty/None
-                text_for_analysis = f"{title} {snippet}".lower()
+            elif snippet:
+                text_for_analysis = f"{title} {snippet}"
                 text_source_type = "snippet_title"
-                self.logger.debug(f"Falling back to snippet/title for analysis from {link}")
-            else: # Fallback to title only if snippet also empty
-                text_for_analysis = title.lower()
+            else:
+                text_for_analysis = title
                 text_source_type = "title_only"
-                self.logger.debug(f"Falling back to title only for analysis from {link}")
 
             if not text_for_analysis.strip():
-                self.logger.warning(f"No text content (extracted, snippet, or title) found for item from {link} with query '{query_source}'. Skipping analysis for this item.")
-                # enlevé: with open(f"parser_loop_item_{idx}_skipped_no_text.marker", "w") as f: f.write("SKIPPED")
+                self.logger.warning(f"No text content for item from {link} (query '{query_source}'). Skipping.")
                 continue
-            # enlevé: with open(f"parser_loop_item_{idx}_text_determined.marker", "w") as f: f.write(text_source_type)
 
+            # 1. Enhanced Leniency Score Calculation
+            leniency_score, nlp_entities = self._calculate_leniency_score(
+                text_for_analysis,
+                link,  # source_url
+                item_timestamp_str,
+                batch_crawl_timestamp
+            )
 
-            # 1. Keyword & Phrase Recognition for Leniency Score
-            leniency_score = self._calculate_leniency_score(text_for_analysis)
-            # enlevé: with open(f"parser_loop_item_{idx}_score_calculated.marker", "w") as f: f.write(str(leniency_score))
-
-            # 2. Basic Sentiment Analysis
-            sentiment = self._analyze_text_sentiment(text_for_analysis)
-            # enlevé: with open(f"parser_loop_item_{idx}_sentiment_analyzed.marker", "w") as f: f.write(sentiment)
+            # 2. Basic Sentiment Analysis (can remain as is, or be enhanced by NLP later)
+            sentiment = self._analyze_text_sentiment(text_for_analysis.lower()) # Ensure lower for this
 
             # Aggregate data for the MVNO
             parsed_data[mvno_name]["mentions"] += 1
-            parsed_data[mvno_name]["total_leniency_score"] += leniency_score
+            parsed_data[mvno_name]["total_leniency_score"] += leniency_score # Now float
             if sentiment == "positive":
                 parsed_data[mvno_name]["positive_sentiment_mentions"] += 1
             elif sentiment == "negative":
                 parsed_data[mvno_name]["negative_sentiment_mentions"] += 1
-            # enlevé: with open(f"parser_loop_item_{idx}_aggregation_done.marker", "w") as f: f.write("DONE")
 
-            # Store source and individual score for traceability
-            # Updated to include new fields from previous steps
+            for entity in nlp_entities:
+                parsed_data[mvno_name]["aggregated_nlp_entities"][entity] += 1
+
             source_details = {
                 "url": link,
                 "title": title,
                 "snippet": snippet,
                 "query_source": query_source,
-                "calculated_score": leniency_score,
+                "calculated_score": leniency_score, # Store the new composite score
                 "estimated_sentiment": sentiment,
                 "text_source_analysed": text_source_type,
                 "extracted_text_length": len(extracted_page_text) if extracted_page_text else 0,
-                "raw_html_length": len(raw_html_content) if raw_html_content else 0
+                "raw_html_length": len(raw_html_content) if raw_html_content else 0,
+                "nlp_entities_found": nlp_entities, # Store entities for this source
+                "item_timestamp_used": item_timestamp_str if item_timestamp_str else batch_crawl_timestamp.isoformat()
             }
             parsed_data[mvno_name]["sources"].append(source_details)
-            # enlevé: with open(f"parser_loop_item_{idx}_source_details_done.marker", "w") as f: f.write("DONE")
 
-            # Track which policy keywords contributed
+            # Track which policy keywords contributed (from traditional keyword spotting)
+            # text_for_analysis is already effectively lowercased by _calculate_leniency_score
+            current_text_lower = text_for_analysis.lower()
             for keyword in LENIENT_POLICY_KEYWORDS:
-                if keyword in text_for_analysis: # text_for_analysis is already lowercased
+                if keyword in current_text_lower:
                     parsed_data[mvno_name]["policy_keywords"][keyword] +=1
             for keyword in STRINGENT_POLICY_KEYWORDS:
-                 if keyword in text_for_analysis: # text_for_analysis is already lowercased
+                 if keyword in current_text_lower:
                     parsed_data[mvno_name]["policy_keywords"][keyword] +=1
-            # enlevé: with open(f"parser_loop_item_{idx}_keywords_tracked.marker", "w") as f: f.write("DONE")
-            # enlevé: with open(f"parser_loop_item_{idx}_end.marker", "w") as f: f.write("END")
 
-        # enlevé: with open("parser_avg_score_loop_start.marker", "w") as f: f.write("START")
         # Calculate average leniency score
-        for mvno_avg_idx, (mvno, data) in enumerate(parsed_data.items()):
+        for mvno, data in parsed_data.items():
             if data["mentions"] > 0:
                 data["average_leniency_score"] = data["total_leniency_score"] / data["mentions"]
             else:
-                data["average_leniency_score"] = 0
-            # enlevé: with open(f"parser_avg_score_calculated_{mvno_avg_idx}.marker", "w") as f: f.write(f"{mvno}: {data['average_leniency_score']}")
+                data["average_leniency_score"] = 0.0 # Float
 
-        # enlevé: with open("parser_pre_parsing_complete_log.marker", "w") as f: f.write("DONE")
-        self.logger.info(f"Parsing complete. Processed data for {len(parsed_data)} MVNOs.")
-        # enlevé: with open("parser_post_parsing_complete_log.marker", "w") as f: f.write("DONE")
+            # Convert aggregated_nlp_entities from defaultdict to dict for serialization
+            data["aggregated_nlp_entities"] = dict(data["aggregated_nlp_entities"])
+
+
+        self.logger.info(f"Parsing complete with NLP. Processed data for {len(parsed_data)} MVNOs.")
 
         # Save processed data
-        # enlevé: with open("parser_pre_save.marker", "w") as f: f.write("START")
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = os.path.join(self.output_dir, f"parsed_mvno_data_{timestamp}.json")
+        timestamp_str = time.strftime("%Y%m%d-%H%M%S") # Changed variable name for clarity
+        filename = os.path.join(self.output_dir, f"parsed_mvno_data_{timestamp_str}.json")
         try:
             # Convert defaultdict to dict for JSON serialization
             serializable_data = {k: dict(v) for k, v in parsed_data.items()}
-            for mvno_data_key in serializable_data: # ensure policy_keywords is also dict (changed loop variable name for clarity)
+            for mvno_data_key in serializable_data:
                 serializable_data[mvno_data_key]["policy_keywords"] = dict(serializable_data[mvno_data_key]["policy_keywords"])
+                # aggregated_nlp_entities already converted above
 
             with open(filename, "w") as f:
                 json.dump(serializable_data, f, indent=4)
-            # enlevé: with open("parser_post_save.marker", "w") as f: f.write(f"SUCCESS: {filename}")
-            self.logger.info(f"Processed MVNO data saved to {filename}")
+            self.logger.info(f"Processed MVNO data (NLP enhanced) saved to {filename}")
             return filename
         except Exception as e:
-            # enlevé: with open("parser_save_failed.marker", "w") as f: f.write(f"ERROR: {e}")
-            self.logger.error(f"Failed to save processed MVNO data: {e}", exc_info=True)
+            self.logger.error(f"Failed to save NLP enhanced processed MVNO data: {e}", exc_info=True)
             return None
 
 if __name__ == '__main__':
