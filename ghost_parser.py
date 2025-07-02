@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time # <--- ADDED IMPORT
 from collections import defaultdict
 from ghost_config import GhostConfig # Assuming ghost_config.py is in the same directory or PYTHONPATH
 
@@ -164,35 +165,62 @@ class GhostParser:
             return None
 
         parsed_data = defaultdict(lambda: {"sources": [], "total_leniency_score": 0, "mentions": 0, "positive_sentiment_mentions": 0, "negative_sentiment_mentions": 0, "policy_keywords": defaultdict(int)})
+        self.logger.info(f"Parser: Starting processing of {len(raw_results)} raw_results items.")
 
-        for item in raw_results:
+        for idx, item in enumerate(raw_results):
+            # enlevé: with open(f"parser_loop_item_{idx}_start.marker", "w") as f: f.write(f"Item: {item.get('link')}")
             title = item.get("title", "")
             snippet = item.get("snippet", "")
             link = item.get("link", "")
-            query_source = item.get("query_source", "") # Added by crawler
+            query_source = item.get("query_source", "")
+            raw_html_content = item.get("raw_html_content") # May be None
+            extracted_page_text = item.get("extracted_page_text") # May be None or empty
 
-            # Attempt to identify the MVNO from the query source
-            # This is a simplification. A better way might involve passing the original MVNO list used by the crawler.
-            mvno_name_match = re.match(r"([^ ]+(\s[^ ]+)?)", query_source) # Try to get first 1 or 2 words as MVNO
-            mvno_name = mvno_name_match.group(0).strip() if mvno_name_match else "Unknown MVNO"
+            # --- MVNO Name Extraction (using existing logic) ---
+            try:
+                # This is a simplification. A better way might involve passing the original MVNO list used by the crawler.
+                mvno_name_match = re.match(r"([^ ]+(\s[^ ]+)?)", query_source)
+                mvno_name = mvno_name_match.group(0).strip() if mvno_name_match else "Unknown MVNO"
+                if "google fi" in query_source.lower():
+                    mvno_name = "Google Fi"
+                elif "us mobile" in query_source.lower():
+                     mvno_name = "US Mobile"
+            except Exception as e_regex:
+                self.logger.error(f"Regex error processing query_source '{query_source}': {e_regex}", exc_info=True)
+                mvno_name = "Unknown MVNO"
+            # enlevé: with open(f"parser_loop_item_{idx}_mvno_extracted.marker", "w") as f: f.write(mvno_name)
+            # --- End MVNO Name Extraction ---
 
-            # For now, let's assume the first part of the query is the MVNO name.
-            # This needs to be more robust, perhaps by using the original MVNO list.
-            # query_parts = query_source.split(' ', 1)
-            # mvno_name = query_parts[0] if query_parts else "Unknown MVNO"
-            if "google fi" in query_source.lower(): # hack for two word name
-                mvno_name = "Google Fi"
-            elif "us mobile" in query_source.lower():
-                 mvno_name = "US Mobile"
+            # Determine the primary text content for analysis
+            text_for_analysis = ""
+            text_source_type = "none"
+            if extracted_page_text and extracted_page_text.strip():
+                text_for_analysis = extracted_page_text.lower()
+                text_source_type = "extracted_page_text"
+                self.logger.debug(f"Using extracted_page_text for analysis from {link} (length: {len(text_for_analysis)})")
+            elif snippet: # Fallback to snippet if extracted_page_text is empty/None
+                text_for_analysis = f"{title} {snippet}".lower()
+                text_source_type = "snippet_title"
+                self.logger.debug(f"Falling back to snippet/title for analysis from {link}")
+            else: # Fallback to title only if snippet also empty
+                text_for_analysis = title.lower()
+                text_source_type = "title_only"
+                self.logger.debug(f"Falling back to title only for analysis from {link}")
 
+            if not text_for_analysis.strip():
+                self.logger.warning(f"No text content (extracted, snippet, or title) found for item from {link} with query '{query_source}'. Skipping analysis for this item.")
+                # enlevé: with open(f"parser_loop_item_{idx}_skipped_no_text.marker", "w") as f: f.write("SKIPPED")
+                continue
+            # enlevé: with open(f"parser_loop_item_{idx}_text_determined.marker", "w") as f: f.write(text_source_type)
 
-            text_content = f"{title} {snippet}".lower() # Combine title and snippet for analysis
 
             # 1. Keyword & Phrase Recognition for Leniency Score
-            leniency_score = self._calculate_leniency_score(text_content)
+            leniency_score = self._calculate_leniency_score(text_for_analysis)
+            # enlevé: with open(f"parser_loop_item_{idx}_score_calculated.marker", "w") as f: f.write(str(leniency_score))
 
             # 2. Basic Sentiment Analysis
-            sentiment = self._analyze_text_sentiment(text_content)
+            sentiment = self._analyze_text_sentiment(text_for_analysis)
+            # enlevé: with open(f"parser_loop_item_{idx}_sentiment_analyzed.marker", "w") as f: f.write(sentiment)
 
             # Aggregate data for the MVNO
             parsed_data[mvno_name]["mentions"] += 1
@@ -201,50 +229,65 @@ class GhostParser:
                 parsed_data[mvno_name]["positive_sentiment_mentions"] += 1
             elif sentiment == "negative":
                 parsed_data[mvno_name]["negative_sentiment_mentions"] += 1
+            # enlevé: with open(f"parser_loop_item_{idx}_aggregation_done.marker", "w") as f: f.write("DONE")
 
             # Store source and individual score for traceability
-            parsed_data[mvno_name]["sources"].append({
+            # Updated to include new fields from previous steps
+            source_details = {
                 "url": link,
                 "title": title,
                 "snippet": snippet,
                 "query_source": query_source,
-                "calculated_score_for_snippet": leniency_score,
-                "estimated_sentiment": sentiment
-            })
+                "calculated_score": leniency_score,
+                "estimated_sentiment": sentiment,
+                "text_source_analysed": text_source_type,
+                "extracted_text_length": len(extracted_page_text) if extracted_page_text else 0,
+                "raw_html_length": len(raw_html_content) if raw_html_content else 0
+            }
+            parsed_data[mvno_name]["sources"].append(source_details)
+            # enlevé: with open(f"parser_loop_item_{idx}_source_details_done.marker", "w") as f: f.write("DONE")
 
             # Track which policy keywords contributed
             for keyword in LENIENT_POLICY_KEYWORDS:
-                if keyword in text_content:
+                if keyword in text_for_analysis: # text_for_analysis is already lowercased
                     parsed_data[mvno_name]["policy_keywords"][keyword] +=1
             for keyword in STRINGENT_POLICY_KEYWORDS:
-                 if keyword in text_content:
+                 if keyword in text_for_analysis: # text_for_analysis is already lowercased
                     parsed_data[mvno_name]["policy_keywords"][keyword] +=1
+            # enlevé: with open(f"parser_loop_item_{idx}_keywords_tracked.marker", "w") as f: f.write("DONE")
+            # enlevé: with open(f"parser_loop_item_{idx}_end.marker", "w") as f: f.write("END")
 
-
+        # enlevé: with open("parser_avg_score_loop_start.marker", "w") as f: f.write("START")
         # Calculate average leniency score
-        for mvno, data in parsed_data.items():
+        for mvno_avg_idx, (mvno, data) in enumerate(parsed_data.items()):
             if data["mentions"] > 0:
                 data["average_leniency_score"] = data["total_leniency_score"] / data["mentions"]
             else:
                 data["average_leniency_score"] = 0
+            # enlevé: with open(f"parser_avg_score_calculated_{mvno_avg_idx}.marker", "w") as f: f.write(f"{mvno}: {data['average_leniency_score']}")
 
+        # enlevé: with open("parser_pre_parsing_complete_log.marker", "w") as f: f.write("DONE")
         self.logger.info(f"Parsing complete. Processed data for {len(parsed_data)} MVNOs.")
+        # enlevé: with open("parser_post_parsing_complete_log.marker", "w") as f: f.write("DONE")
 
         # Save processed data
+        # enlevé: with open("parser_pre_save.marker", "w") as f: f.write("START")
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         filename = os.path.join(self.output_dir, f"parsed_mvno_data_{timestamp}.json")
         try:
             # Convert defaultdict to dict for JSON serialization
             serializable_data = {k: dict(v) for k, v in parsed_data.items()}
-            for mvno in serializable_data: # ensure policy_keywords is also dict
-                serializable_data[mvno]["policy_keywords"] = dict(serializable_data[mvno]["policy_keywords"])
+            for mvno_data_key in serializable_data: # ensure policy_keywords is also dict (changed loop variable name for clarity)
+                serializable_data[mvno_data_key]["policy_keywords"] = dict(serializable_data[mvno_data_key]["policy_keywords"])
 
             with open(filename, "w") as f:
                 json.dump(serializable_data, f, indent=4)
+            # enlevé: with open("parser_post_save.marker", "w") as f: f.write(f"SUCCESS: {filename}")
             self.logger.info(f"Processed MVNO data saved to {filename}")
             return filename
         except Exception as e:
-            self.logger.error(f"Failed to save processed MVNO data: {e}")
+            # enlevé: with open("parser_save_failed.marker", "w") as f: f.write(f"ERROR: {e}")
+            self.logger.error(f"Failed to save processed MVNO data: {e}", exc_info=True)
             return None
 
 if __name__ == '__main__':

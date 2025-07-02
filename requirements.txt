@@ -1,7 +1,7 @@
 cryptography
 npyscreen
-# google-api-python-client # Add if/when using the real Google Search API
-# requests # Add if/when implementing direct URL fetching in crawler/parser
-# beautifulsoup4 # Add if/when implementing HTML parsing from fetched URLs
+google-api-python-client
+requests
+beautifulsoup4
 # lxml # Alternative HTML parser
 # reportlab # Add if/when implementing PDF report generation

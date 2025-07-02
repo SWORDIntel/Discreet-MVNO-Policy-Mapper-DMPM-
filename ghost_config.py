@@ -153,15 +153,32 @@ class GhostConfig:
         log_level_str = self.get("log_level", "INFO").upper()
         log_level = getattr(logging, log_level_str, logging.INFO)
 
+        # Remove existing handlers from the root logger before reconfiguring
+        # This makes _setup_logging idempotent if called multiple times.
+        root = logging.getLogger()
+        if root.handlers:
+            for handler in root.handlers[:]:
+                root.removeHandler(handler)
+                handler.close() # Close the handler before removing
+
+        log_file_path = self.get("log_file")
+        if not log_file_path:
+            # Fallback if log_file is somehow not set, though main.py should set it.
+            log_file_path = os.path.join(self.get("output_dir", "output"), "ghost_app_fallback.log")
+            # Ensure this fallback path directory exists
+            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+            logging.warning(f"Log file path not explicitly configured, falling back to {log_file_path}")
+
+
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[
-                logging.FileHandler(self.get("log_file", os.path.join(self.get("output_dir", "output"), "ghost_app.log"))),
+                logging.FileHandler(log_file_path),
                 logging.StreamHandler()
             ]
         )
-        logging.info("Logging initialized.")
+        logging.info("Logging re-initialized via _setup_logging.") # Changed message for clarity
 
     def get_logger(self, name):
         """
