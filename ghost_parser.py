@@ -2,10 +2,19 @@ import json
 import os
 import re
 import time
+import difflib # Added for fuzzy matching
 from collections import defaultdict
 from datetime import datetime, timezone
 
-# Removed spacy import and related comments
+try:
+    import spacy
+    from spacy.matcher import Matcher
+    # Attempt to import spacytextblob for sentiment analysis
+    from spacytextblob.spacytextblob import SpacyTextBlob
+except ImportError:
+    spacy = None
+    Matcher = None
+    SpacyTextBlob = None
 
 from ghost_config import GhostConfig
 
@@ -68,7 +77,155 @@ class GhostParser:
         self.config_manager = config_manager
         self.logger = self.config_manager.get_logger("GhostParser")
         self.output_dir = self.config_manager.get("output_dir", "output")
-        # self.nlp = self._initialize_nlp() # NLP initialization removed
+
+        self.nlp_available = False
+        self.nlp_model = None
+        self.nlp_matcher = None
+        self.nlp_mode = self.config_manager.get("nlp_mode", "auto") # auto | spacy | regex
+
+        if spacy and SpacyTextBlob and Matcher and self.nlp_mode != "regex": # Check if spacy and required components are imported
+            self._initialize_nlp()
+        else:
+            if self.nlp_mode == "spacy":
+                self.logger.error("NLP mode set to 'spacy' but spaCy or SpacyTextBlob/Matcher is not available. Falling back to regex.")
+            else: # auto mode or regex mode where spacy is not available
+                 self.logger.info("spaCy, SpacyTextBlob, or Matcher not available or NLP mode set to 'regex'. Using regex-based analysis.")
+            self.nlp_available = False
+
+
+        self.mvno_list_file = self.config_manager.get("mvno_list_file", "mvnos.txt")
+        self.known_mvnos_normalized = {} # Stores {normalized_name: original_name}
+        self.mvno_aliases = self.config_manager.get("mvno_aliases", {}) # e.g., {"google fi": "Google Fi Wireless"}
+        self._load_known_mvnos()
+
+    def _initialize_nlp(self):
+        """
+        Initializes the spaCy NLP model and Matcher if spaCy is available.
+        Sets self.nlp_available flag.
+        """
+        if not spacy or not SpacyTextBlob or not Matcher: # Should be caught before calling, but double check
+            self.logger.warning("Attempted to initialize NLP when spaCy or its components are unavailable.")
+            self.nlp_available = False
+            return
+
+        try:
+            # Try to load a small English model.
+            # Users might need to download this: python -m spacy download en_core_web_sm
+            self.nlp_model = spacy.load("en_core_web_sm")
+
+            # Add SpacyTextBlob to the pipeline for sentiment if not already present
+            # Some models might include it, others might not.
+            # Check if 'spacytextblob' is already in the pipeline
+            if 'spacytextblob' not in self.nlp_model.pipe_names:
+                self.nlp_model.add_pipe("spacytextblob")
+                self.logger.info("Added SpacyTextBlob to NLP pipeline for sentiment analysis.")
+            else:
+                self.logger.info("SpacyTextBlob component already present in NLP pipeline.")
+
+            self.nlp_matcher = Matcher(self.nlp_model.vocab)
+            self._setup_nlp_matchers() # Setup policy requirement patterns
+
+            self.nlp_available = True
+            self.logger.info("spaCy NLP model 'en_core_web_sm' loaded successfully with SpacyTextBlob and Matcher.")
+        except OSError:
+            self.logger.error(
+                "spaCy model 'en_core_web_sm' not found. "
+                "Please download it: python -m spacy download en_core_web_sm. "
+                "Falling back to regex-based analysis."
+            )
+            self.nlp_model = None
+            self.nlp_available = False
+        except Exception as e:
+            self.logger.error(f"Error initializing spaCy NLP: {e}. Falling back to regex-based analysis.")
+            self.nlp_model = None
+            self.nlp_available = False
+
+    def _setup_nlp_matchers(self):
+        """Sets up the spaCy Matcher with patterns for policy requirements."""
+        if not self.nlp_matcher:
+            return
+
+        # Define patterns for policy requirements
+        # Pattern format: list of dictionaries, each dict describes a token
+        # "OP": "?" means optional, "*" zero or more, "+" one or more
+        patterns = {
+            "REQUIRES_ID": [
+                [{"LOWER": "requires"}, {"LOWER": "id"}],
+                [{"LOWER": "must"}, {"LOWER": "provide"}, {"LOWER": "id"}],
+                [{"LOWER": "id"}, {"LOWER": "is"}, {"LOWER": "required"}],
+                [{"LOWER": "identification"}, {"LOWER": "needed"}]
+            ],
+            "NO_ID_NEEDED": [
+                [{"LOWER": "no"}, {"LOWER": "id"}, {"LOWER": "required"}],
+                [{"LOWER": "id"}, {"LOWER": "not"}, {"LOWER": "needed"}],
+                [{"LOWER": "doesn't"}, {"LOWER": "require"}, {"LOWER": "id"}]
+            ],
+            "MUST_PROVIDE_INFO": [ # Generic "must provide"
+                [{"LOWER": "must"}, {"LOWER": "provide"}, {"ENT_TYPE": "PERSON", "OP": "?"}, {"ENT_TYPE": "ORG", "OP": "?"}],
+                [{"LOWER": "requires"}, {"ENT_TYPE": "PERSON", "OP": "?"}, {"ENT_TYPE": "ORG", "OP": "?"}]
+            ]
+            # Add more patterns as needed
+        }
+
+        for pattern_name, pattern_rules in patterns.items():
+            self.nlp_matcher.add(pattern_name, pattern_rules)
+        self.logger.info(f"Initialized spaCy Matcher with {len(patterns)} pattern types.")
+
+
+    def _normalize_mvno_name(self, name: str) -> str:
+        """
+        Normalizes an MVNO name by converting to lowercase and removing common suffixes.
+        """
+        name_lower = name.lower()
+        suffixes_to_remove = [
+            " inc", " llc", " wireless", " mobile", " telecom", " communications",
+            ".com", ".net", ".org", # also remove common TLDs if they are part of name
+            " corporation", " company", " group", " services", " solutions"
+        ]
+        for suffix in suffixes_to_remove:
+            if name_lower.endswith(suffix):
+                name_lower = name_lower[:-len(suffix)]
+
+        # Remove extra spaces that might result from suffix removal or be present initially
+        name_lower = re.sub(r'\s+', ' ', name_lower).strip()
+        return name_lower
+
+    def _load_known_mvnos(self):
+        """
+        Loads MVNOs from the mvno_list_file and populates the
+        self.known_mvnos_normalized dictionary. Applies normalization.
+        Also incorporates aliases from config.
+        """
+        try:
+            with open(self.mvno_list_file, "r") as f:
+                mvnos = [line.strip() for line in f if line.strip()]
+            for mvno_original in mvnos:
+                normalized = self._normalize_mvno_name(mvno_original)
+                if normalized not in self.known_mvnos_normalized: # Keep first original form if multiple normalize to same
+                    self.known_mvnos_normalized[normalized] = mvno_original
+                else:
+                    self.logger.debug(f"Normalized name collision: '{normalized}' from '{mvno_original}' already mapped to '{self.known_mvnos_normalized[normalized]}'.")
+
+            self.logger.info(f"Loaded {len(self.known_mvnos_normalized)} unique normalized MVNOs from {self.mvno_list_file}.")
+
+            # Process aliases: normalized alias maps to canonical original name from mvnos.txt (if exists) or the alias value
+            for alias_key, canonical_name_target in self.mvno_aliases.items():
+                normalized_alias_key = self._normalize_mvno_name(alias_key)
+                normalized_canonical_target = self._normalize_mvno_name(canonical_name_target)
+
+                # Prefer the version of canonical_name_target that's already in known_mvnos_normalized (if any)
+                final_target_name = self.known_mvnos_normalized.get(normalized_canonical_target, canonical_name_target)
+
+                if normalized_alias_key not in self.known_mvnos_normalized:
+                    self.known_mvnos_normalized[normalized_alias_key] = final_target_name
+                    self.logger.info(f"Added alias: '{normalized_alias_key}' -> '{final_target_name}'")
+                else:
+                    self.logger.warning(f"Alias key '{normalized_alias_key}' conflicts with an existing MVNO. Original: '{self.known_mvnos_normalized[normalized_alias_key]}', Alias target: '{final_target_name}'. Alias not applied for this key if it's different.")
+
+        except FileNotFoundError:
+            self.logger.error(f"MVNO list file not found: {self.mvno_list_file}. MVNO extraction will be limited.")
+        except Exception as e:
+            self.logger.error(f"Error loading MVNO list file {self.mvno_list_file}: {e}")
 
     # _initialize_nlp method is now fully removed.
     # _extract_policy_entities method (NLP-based) is now fully removed.
@@ -180,44 +337,161 @@ class GhostParser:
             self.logger.error(f"Error loading raw data from {filepath}: {e}")
             return None
 
+    def _fuzzy_match_mvno(self, name_to_match: str) -> tuple[str | None, float]:
+        """
+        Attempts to match an extracted name against the known MVNO list using various strategies.
+        Returns the matched canonical MVNO name and a confidence score.
+        Scores: exact=1.0, fuzzy=0.8-0.99 (depending on similarity), contains=0.5, None=0.0
+        """
+        normalized_to_match = self._normalize_mvno_name(name_to_match)
+
+        # 1. Exact match on normalized names
+        if normalized_to_match in self.known_mvnos_normalized:
+            return self.known_mvnos_normalized[normalized_to_match], 1.0
+
+        # 2. Fuzzy match using difflib
+        #    get_close_matches returns a list of matches, we take the best one if any
+        #    A higher cutoff means stricter matching. 0.8 is a reasonable starting point.
+        #    Adjust n to 1 to get only the best match.
+        possible_matches = difflib.get_close_matches(normalized_to_match,
+                                                     self.known_mvnos_normalized.keys(),
+                                                     n=1, cutoff=0.8)
+        if possible_matches:
+            best_match_normalized = possible_matches[0]
+            # Calculate similarity score more precisely for the "best" fuzzy match.
+            # This score will be > cutoff (0.8)
+            similarity_score = difflib.SequenceMatcher(None, normalized_to_match, best_match_normalized).ratio()
+            # Scale score slightly to be distinct from exact match, e.g., 0.8 to 0.95 range based on actual ratio
+            adjusted_score = 0.8 + (similarity_score - 0.8) * 0.75 # Maps 0.8-1.0 ratio to 0.8-0.95 score
+            return self.known_mvnos_normalized[best_match_normalized], adjusted_score
+
+
+        # 3. "Contains" match (e.g., "us mobile" is contained in "us mobile review")
+        #    This is tricky because "mobile" could be in many, so we check if a known MVNO name
+        #    is *contained within* the name_to_match (normalized).
+        for known_norm, known_orig in self.known_mvnos_normalized.items():
+            if known_norm in normalized_to_match:
+                 # Ensure it's a significant part of the name, not just "us" in "asus"
+                if len(known_norm) > 3 or known_norm == normalized_to_match: # very short names must be exact match essentially
+                    return known_orig, 0.5 # Lower confidence for "contains"
+
+        self.logger.info(f"MVNO not matched: '{name_to_match}' (normalized: '{normalized_to_match}')")
+        return None, 0.0
+
+
     def _extract_mvno_name_from_query(self, query_source: str) -> str:
         """
         Extracts a potential MVNO name from the original search query string.
-        This method uses heuristics (e.g., taking the first one or two words) and
-        may require refinement for higher accuracy. It includes specific hacks for
-        known two-word names like "Google Fi" and "US Mobile".
+        This version attempts to identify the MVNO part of the query and then
+        uses fuzzy matching to find the canonical name.
 
         Args:
             query_source (str): The original search query string (e.g., "US Mobile no ID prepaid").
 
         Returns:
-            str: The extracted MVNO name, or "Unknown MVNO" if extraction fails.
+            str: The canonical MVNO name if matched, or "Unknown MVNO" if extraction fails.
         """
-        # Specific two-word name checks first for better accuracy
-        if "google fi" in query_source.lower():
-            return "Google Fi"
-        if "us mobile" in query_source.lower():
-            return "US Mobile"
+        # Heuristic: Assume MVNO name is likely at the beginning of the query.
+        # Try to extract first few words as potential MVNO name.
+        # Example: "US Mobile", "Mint Mobile", "Google Fi"
+        # More complex queries like "what is the policy of Tello for cash" are harder.
 
-        # General heuristic: if the first part is short (e.g. "US"), take two parts. Otherwise one.
-        parts = query_source.split()
-        if not parts:
-            return "Unknown MVNO" # pragma: no cover
-        if len(parts) > 1 and len(parts[0]) <= 3 and parts[0].upper() == parts[0]: # e.g. US Mobile
-            return f"{parts[0]} {parts[1]}"
-        return parts[0]
+        # Try matching longer phrases first. Consider up to 3-4 words for MVNO names.
+        query_parts = query_source.split()
+        potential_mvno_str = ""
+        best_match_name = None
+        highest_score = 0.0
+
+        # Check phrases of decreasing length (e.g., "Google Fi Wireless", then "Google Fi", then "Google")
+        # This gives precedence to longer, more specific matches from the query.
+        for num_words in range(min(4, len(query_parts)), 0, -1):
+            current_phrase_to_test = " ".join(query_parts[:num_words])
+
+            # Try direct fuzzy match on this extracted phrase
+            matched_name, score = self._fuzzy_match_mvno(current_phrase_to_test)
+
+            if matched_name and score > highest_score:
+                highest_score = score
+                best_match_name = matched_name
+                # If we get a very high score (exact or very close fuzzy), we can be confident.
+                if score >= 0.95: # Adjusted threshold, exact is 1.0
+                    break
+
+        if best_match_name:
+            self.logger.debug(f"Extracted MVNO '{best_match_name}' from query '{query_source}' with score {highest_score:.2f}")
+            return best_match_name
+
+        # Fallback: Log if no confident match was found from query
+        self.logger.info(f"Could not confidently extract known MVNO from query: '{query_source}'. Will be categorized as 'Unknown MVNO' or based on item title/domain if possible later.")
+        # The original simple heuristic as a last resort if the above fails, but fuzzy matching should handle most.
+        # However, the old logic was very basic. _fuzzy_match_mvno is more robust.
+        # If nothing found, return "Unknown MVNO"
+        return "Unknown MVNO"
+
+    # --- NLP Enhanced Analysis Methods ---
+    def _analyze_sentiment_nlp(self, doc) -> tuple[str, float]:
+        """
+        Analyzes sentiment using spaCy (SpacyTextBlob).
+        Returns (sentiment_label, confidence_score).
+        Sentiment labels: "positive", "negative", "neutral".
+        Confidence is the polarity score.
+        """
+        if not self.nlp_available or not doc or not hasattr(doc, '_') or not hasattr(doc._, 'blob'):
+            self.logger.debug("NLP not available or doc has no sentiment blob for sentiment analysis.")
+            return "neutral", 0.0
+
+        polarity = doc._.blob.polarity
+        # SpacyTextBlob polarity is between -1 (negative) and 1 (positive)
+        # Thresholds can be adjusted.
+        if polarity > 0.1: # Threshold for positive
+            sentiment_label = "positive"
+        elif polarity < -0.1: # Threshold for negative
+            sentiment_label = "negative"
+        else:
+            sentiment_label = "neutral"
+
+        # Confidence is the absolute polarity score, scaled if needed, or just the raw polarity.
+        # For simplicity, let's use raw polarity as confidence.
+        return sentiment_label, polarity
 
 
-    def _analyze_text_sentiment(self, text: str) -> str:
+    def _extract_entities_nlp(self, doc) -> list[tuple[str, str]]:
+        """
+        Extracts specified entities (ORG, MONEY, DATE) using spaCy.
+        Returns a list of tuples: (entity_text, entity_label).
+        """
+        if not self.nlp_available or not doc:
+            return []
+
+        entities = []
+        target_labels = {"ORG", "MONEY", "DATE"}
+        for ent in doc.ents:
+            if ent.label_ in target_labels:
+                entities.append((ent.text, ent.label_))
+        return entities
+
+    def _extract_policy_requirements_nlp(self, doc) -> list[tuple[str, str, float]]:
+        """
+        Extracts policy requirements using spaCy Matcher.
+        Returns a list of tuples: (match_id_str, matched_text, confidence_score).
+        Confidence score here is basic (1.0 for any match).
+        """
+        if not self.nlp_available or not self.nlp_matcher or not doc:
+            return []
+
+        matches = self.nlp_matcher(doc)
+        extracted_requirements = []
+        for match_id, start, end in matches:
+            match_id_str = self.nlp_model.vocab.strings[match_id] # Get string representation
+            span = doc[start:end]
+            extracted_requirements.append((match_id_str, span.text, 1.0)) # Basic confidence
+        return extracted_requirements
+
+    # --- Regex Fallback Method (remains) ---
+    def _analyze_text_sentiment_regex(self, text: str) -> str:
         """
         Performs a very basic keyword-based sentiment analysis on the provided text.
-        Compares words in the text against predefined lists of positive and negative words.
-
-        Args:
-            text (str): The text content to analyze.
-
-        Returns:
-            str: "positive", "negative", or "neutral" based on the simplistic analysis.
+        (This is the original _analyze_text_sentiment method, renamed for clarity)
         """
         score = 0
         text_lower = text.lower()
@@ -237,110 +511,105 @@ class GhostParser:
         text_content: str,
         source_url: str | None,
         item_timestamp_str: str | None,
-        batch_crawl_timestamp: datetime
-    ) -> tuple[float, list[str]]:
+        batch_crawl_timestamp: datetime,
+        doc: 'spacy.tokens.Doc | None' = None # Allow passing pre-processed spaCy Doc
+    ) -> tuple[float, list[str], dict[str, any]]: # Added nlp_analysis_summary
         """
-        Calculates a composite leniency score for a given text content.
-        The score incorporates keyword matching, NLP entity analysis, source credibility,
-        and temporal decay.
-
-        Args:
-            text_content (str): The text (e.g., search result snippet, extracted page text) to analyze.
-            source_url (str | None): The URL of the data source.
-            item_timestamp_str (str | None): ISO format string of the item's publication date.
-            batch_crawl_timestamp (datetime): Timestamp of the current crawl batch.
+        Calculates a composite leniency score. Uses NLP if available and `doc` is provided,
+        otherwise falls back to regex/keyword-based scoring.
 
         Returns:
-            tuple[float, list[str]]: A tuple containing:
-                - float: The calculated composite leniency score.
-                - list[str]: A list of policy-related entities extracted by NLP.
+            tuple: (final_score, policy_keywords_matched, nlp_analysis_summary)
+                   nlp_analysis_summary contains sentiment, entities, policy_matches from NLP.
         """
         if not text_content:
-            return 0.0, []
+            return 0.0, [], {}
 
-        text_lower = text_content.lower()
         base_score = 0
         nlp_score_adjustment = 0
+        policy_keywords_matched = [] # For regex-based keywords
+        nlp_analysis_summary = {
+            "sentiment_label": "neutral", "sentiment_confidence": 0.0,
+            "entities": [], "policy_requirements": [], "nlp_used": False
+        }
 
-        # 1. Traditional Keyword Scoring (base)
-        for keyword, points in LENIENT_POLICY_KEYWORDS.items():
-            if keyword in text_lower:
-                base_score += points
-        for keyword, points in STRINGENT_POLICY_KEYWORDS.items():
-            if keyword in text_lower: # points are already negative
-                base_score += points
+        # --- NLP Processing (if available and doc provided) ---
+        if self.nlp_available and self.nlp_model and doc:
+            nlp_analysis_summary["nlp_used"] = True
 
-        # 2. NLP Entity Extraction and Scoring Adjustment
-        extracted_entities = self._extract_policy_entities(text_lower) # Pass lowercased text
+            # 1. NLP Sentiment
+            sentiment_label, sentiment_confidence = self._analyze_sentiment_nlp(doc)
+            nlp_analysis_summary["sentiment_label"] = sentiment_label
+            nlp_analysis_summary["sentiment_confidence"] = sentiment_confidence
+            # Adjust score based on NLP sentiment (example adjustment)
+            if sentiment_label == "positive": nlp_score_adjustment += 2
+            elif sentiment_label == "negative": nlp_score_adjustment -= 2
 
-        # Example: Boost score if certain positive keywords are found by NLP as distinct entities
-        # This logic can be expanded significantly.
-        nlp_positive_indicators = {"no id", "anonymous", "no ssn", "cash payment", "privacy"}
-        nlp_negative_indicators = {"id verification", "ssn required", "credit check", "kyc"}
+            # 2. NLP Entity Extraction
+            entities = self._extract_entities_nlp(doc)
+            nlp_analysis_summary["entities"] = entities
+            # Example: Adjust score based on certain entities (e.g., presence of "KYC" as ORG or similar)
+            for ent_text, ent_label in entities:
+                if "kyc" in ent_text.lower() and ent_label == "ORG": # Simplified check
+                    nlp_score_adjustment -= 1
 
-        for entity in extracted_entities:
-            # Check if the entity text itself is an indicator
-            if entity in nlp_positive_indicators:
-                nlp_score_adjustment += 2 # Small boost for NLP confirmed positive entities
-            elif entity in nlp_negative_indicators:
-                nlp_score_adjustment -= 2 # Small penalty for NLP confirmed negative entities
-            else:
-                # Check if parts of the entity text match broader keywords (more nuanced)
-                if any(indicator in entity for indicator in nlp_positive_indicators):
-                     nlp_score_adjustment += 1
-                if any(indicator in entity for indicator in nlp_negative_indicators):
-                     nlp_score_adjustment -=1
+
+            # 3. NLP Policy Requirements Matching
+            policy_requirements = self._extract_policy_requirements_nlp(doc)
+            nlp_analysis_summary["policy_requirements"] = policy_requirements
+            # Example: Adjust score based on matched policy patterns
+            for req_type, req_text, req_confidence in policy_requirements:
+                if req_type == "REQUIRES_ID": nlp_score_adjustment -= 3 * req_confidence
+                elif req_type == "NO_ID_NEEDED": nlp_score_adjustment += 3 * req_confidence
+
+        # --- Regex/Keyword based scoring (can act as fallback or complement) ---
+        text_lower = text_content.lower() # For regex/keyword matching
+
+        # Iterate through ADVANCED_POLICY_PATTERNS for regex scoring
+        for pattern_name, pattern_details in ADVANCED_POLICY_PATTERNS.items():
+            try:
+                if re.search(pattern_details["regex"], text_lower, re.IGNORECASE):
+                    base_score += pattern_details["score"]
+                    policy_keywords_matched.append(pattern_name) # Log which regex pattern matched
+            except Exception as e:
+                self.logger.error(f"Error applying regex pattern {pattern_name}: {e}")
+
 
         # Combine base keyword score with NLP adjustment
         combined_keyword_nlp_score = base_score + nlp_score_adjustment
 
-        # 3. Source Credibility Weighting
+        # Source Credibility Weighting
         credibility_weight = self._get_source_credibility(source_url)
 
-        # 4. Temporal Weighting
+        # Temporal Weighting
         temporal_weight = self._calculate_temporal_weight(item_timestamp_str, batch_crawl_timestamp)
 
-        # Calculate final composite score
-        # Example: (keyword_score + nlp_score_adj) * credibility_weight * temporal_weight
-        # Ensure factors are reasonably scaled. If base_score can be large, direct multiplication might be too much.
-        # For now, let's apply them as multipliers to the combined score.
         final_score = combined_keyword_nlp_score * credibility_weight * temporal_weight
 
         self.logger.debug(
-            f"Score calculation for source '{source_url}': "
-            f"BaseKeywords={base_score}, NLPAdjust={nlp_score_adjustment}, "
-            f"Credibility={credibility_weight:.2f}, Temporal={temporal_weight:.2f} "
-            f"-> Final Score={final_score:.2f}"
+            f"Score calc for '{source_url}': BaseRegEx={base_score}, NLPAdjust={nlp_score_adjustment}, "
+            f"Credibility={credibility_weight:.2f}, Temporal={temporal_weight:.2f} -> Final Score={final_score:.2f}. NLP Used: {nlp_analysis_summary['nlp_used']}"
         )
-
-        return final_score, extracted_entities
+        return final_score, policy_keywords_matched, nlp_analysis_summary
 
 
     def parse_results(self, raw_data_filepath: str) -> str | None:
         """
-        Loads raw search results from the given filepath, processes each item to
-        extract MVNO information, calculate leniency scores, and perform sentiment analysis.
-        The aggregated and processed data is then saved to a new timestamped JSON file
-        in the output directory.
-
-        Args:
-            raw_data_filepath (str): Path to the JSON file containing raw search results
-                                     from GhostCrawler.
-
-        Returns:
-            str | None: The filepath of the saved parsed data JSON file if successful,
-                        otherwise None.
+        Loads raw search results, processes each item to extract MVNO info,
+        calculate leniency scores (using NLP if available), and perform sentiment analysis.
+        Saves aggregated data to a new timestamped JSON file.
         """
         raw_results = self._load_raw_data(raw_data_filepath)
         if not raw_results:
             self.logger.error("No raw data to parse.")
             return None
 
-        if not self.nlp: # Check if NLP model loaded
-            self.logger.error("NLP model not available. Cannot perform enhanced parsing.")
-            # Optionally, could fall back to a basic parsing mode here,
-            # but for now, we'll indicate failure to meet enhanced parsing objective.
-            return None
+        # NLP mode check is done in __init__. self.nlp_available reflects this.
+        if self.nlp_mode == "spacy" and not self.nlp_available:
+            self.logger.error("NLP mode is 'spacy' but NLP is not available. Parsing cannot proceed with NLP enhancements as configured.")
+            # Depending on strictness, could return None or proceed with regex only.
+            # For now, it will proceed and _calculate_leniency_score will use regex.
+            # The user is warned at initialization.
 
         # Use file modification time of raw_data_filepath as batch_crawl_timestamp
         try:
@@ -353,111 +622,104 @@ class GhostParser:
 
         parsed_data = defaultdict(lambda: {
             "sources": [],
-            "total_leniency_score": 0.0, # Now float
+            "total_leniency_score": 0.0,
             "mentions": 0,
-            "positive_sentiment_mentions": 0,
-            "negative_sentiment_mentions": 0,
-            "policy_keywords": defaultdict(int),
-            "aggregated_nlp_entities": defaultdict(int) # New: To store counts of NLP entities
+            "positive_sentiment_mentions": 0, # Based on final sentiment (NLP or regex)
+            "negative_sentiment_mentions": 0, # Based on final sentiment
+            "neutral_sentiment_mentions": 0,  # Based on final sentiment
+            "policy_keywords_matched_counts": defaultdict(int), # For regex patterns
+            "aggregated_nlp_entities": defaultdict(int),
+            "aggregated_nlp_policy_requirements": defaultdict(int),
+            "nlp_sentiment_contributions": {"positive": 0, "negative": 0, "neutral": 0} # Specifically from NLP
         })
-        self.logger.info(f"Parser: Starting processing of {len(raw_results)} raw_results items with NLP enhancements.")
+        self.logger.info(f"Parser: Starting processing of {len(raw_results)} items. NLP Available: {self.nlp_available}")
 
         for idx, item in enumerate(raw_results):
             title = item.get("title", "")
             snippet = item.get("snippet", "")
-            link = item.get("link", "") # This is the source_url
+            link = item.get("link", "")
             query_source = item.get("query_source", "")
-            raw_html_content = item.get("raw_html_content")
-            extracted_page_text = item.get("extracted_page_text")
+            # Assuming future crawler might provide these:
+            # raw_html_content = item.get("raw_html_content")
+            # extracted_page_text = item.get("extracted_page_text")
+            item_timestamp_str = item.get("published_date")
 
-            # Attempt to get item-specific timestamp (e.g., from metadata if crawler provides it)
-            # Placeholder: Assuming 'published_date' might be a field in item from future crawler
-            item_timestamp_str = item.get("published_date") # This will be None for current mock data
-
-            # --- MVNO Name Extraction (using existing logic) ---
             mvno_name = self._extract_mvno_name_from_query(query_source)
-            # (Original logic for Google Fi, US Mobile specific extraction can be kept or refined if needed)
-            # For simplicity, relying on the general _extract_mvno_name_from_query here.
 
-            # Determine the primary text content for analysis
-            text_for_analysis = ""
-            text_source_type = "none"
-            if extracted_page_text and extracted_page_text.strip():
-                text_for_analysis = extracted_page_text # Already lowercased in _calculate_leniency_score
-                text_source_type = "extracted_page_text"
-            elif snippet:
-                text_for_analysis = f"{title} {snippet}"
-                text_source_type = "snippet_title"
-            else:
-                text_for_analysis = title
-                text_source_type = "title_only"
+            text_for_analysis = f"{title} {snippet}".strip() # Primary text for now
+            # text_source_type = "snippet_title" # if tracking source of text
 
-            if not text_for_analysis.strip():
+            if not text_for_analysis:
                 self.logger.warning(f"No text content for item from {link} (query '{query_source}'). Skipping.")
                 continue
 
-            # 1. Enhanced Leniency Score Calculation
-            leniency_score, nlp_entities = self._calculate_leniency_score(
-                text_for_analysis,
-                link,  # source_url
-                item_timestamp_str,
-                batch_crawl_timestamp
+            doc = None
+            if self.nlp_available and self.nlp_model:
+                try:
+                    doc = self.nlp_model(text_for_analysis)
+                except Exception as e:
+                    self.logger.error(f"Error processing text with NLP for item {link}: {e}. Will fallback for this item.")
+
+            leniency_score, regex_keywords_matched, nlp_summary = self._calculate_leniency_score(
+                text_for_analysis, link, item_timestamp_str, batch_crawl_timestamp, doc
             )
 
-            # 2. Basic Sentiment Analysis (can remain as is, or be enhanced by NLP later)
-            sentiment = self._analyze_text_sentiment(text_for_analysis.lower()) # Ensure lower for this
+            # Determine final sentiment for this item
+            final_sentiment_label = "neutral"
+            if nlp_summary.get("nlp_used"):
+                final_sentiment_label = nlp_summary["sentiment_label"]
+                # Store NLP specific sentiment contribution
+                parsed_data[mvno_name]["nlp_sentiment_contributions"][final_sentiment_label] += 1
+            else: # Fallback to regex sentiment
+                final_sentiment_label = self._analyze_text_sentiment_regex(text_for_analysis.lower())
 
             # Aggregate data for the MVNO
             parsed_data[mvno_name]["mentions"] += 1
-            parsed_data[mvno_name]["total_leniency_score"] += leniency_score # Now float
-            if sentiment == "positive":
-                parsed_data[mvno_name]["positive_sentiment_mentions"] += 1
-            elif sentiment == "negative":
-                parsed_data[mvno_name]["negative_sentiment_mentions"] += 1
+            parsed_data[mvno_name]["total_leniency_score"] += leniency_score
 
-            for entity in nlp_entities:
-                parsed_data[mvno_name]["aggregated_nlp_entities"][entity] += 1
+            if final_sentiment_label == "positive":
+                parsed_data[mvno_name]["positive_sentiment_mentions"] += 1
+            elif final_sentiment_label == "negative":
+                parsed_data[mvno_name]["negative_sentiment_mentions"] += 1
+            else: # neutral
+                parsed_data[mvno_name]["neutral_sentiment_mentions"] +=1
+
+
+            for keyword in regex_keywords_matched: # These are from ADVANCED_POLICY_PATTERNS
+                parsed_data[mvno_name]["policy_keywords_matched_counts"][keyword] += 1
+
+            if nlp_summary.get("nlp_used"):
+                for entity_text, entity_label in nlp_summary.get("entities", []):
+                    parsed_data[mvno_name]["aggregated_nlp_entities"][f"{entity_label}: {entity_text}"] += 1
+                for req_type, req_text, _ in nlp_summary.get("policy_requirements", []):
+                    parsed_data[mvno_name]["aggregated_nlp_policy_requirements"][f"{req_type}: {req_text}"] += 1
 
             source_details = {
-                "url": link,
-                "title": title,
-                "snippet": snippet,
-                "query_source": query_source,
-                "calculated_score": leniency_score, # Store the new composite score
-                "estimated_sentiment": sentiment,
-                "text_source_analysed": text_source_type,
-                "extracted_text_length": len(extracted_page_text) if extracted_page_text else 0,
-                "raw_html_length": len(raw_html_content) if raw_html_content else 0,
-                "nlp_entities_found": nlp_entities, # Store entities for this source
-                "item_timestamp_used": item_timestamp_str if item_timestamp_str else batch_crawl_timestamp.isoformat()
+                "url": link, "title": title, "snippet": snippet, "query_source": query_source,
+                "calculated_score": leniency_score,
+                "final_sentiment": final_sentiment_label,
+                # "text_source_analysed": text_source_type,
+                "item_timestamp_used": item_timestamp_str if item_timestamp_str else batch_crawl_timestamp.isoformat(),
+                "nlp_analysis": nlp_summary # Store the whole NLP summary for this source
             }
             parsed_data[mvno_name]["sources"].append(source_details)
 
-            # Track which policy keywords contributed (from traditional keyword spotting)
-            # text_for_analysis is already effectively lowercased by _calculate_leniency_score
-            current_text_lower = text_for_analysis.lower()
-            for keyword in LENIENT_POLICY_KEYWORDS:
-                if keyword in current_text_lower:
-                    parsed_data[mvno_name]["policy_keywords"][keyword] +=1
-            for keyword in STRINGENT_POLICY_KEYWORDS:
-                 if keyword in current_text_lower:
-                    parsed_data[mvno_name]["policy_keywords"][keyword] +=1
-
-        # Calculate average leniency score
+        # Calculate average leniency score and finalize structures for JSON
         for mvno, data in parsed_data.items():
             if data["mentions"] > 0:
                 data["average_leniency_score"] = data["total_leniency_score"] / data["mentions"]
             else:
-                data["average_leniency_score"] = 0.0 # Float
+                data["average_leniency_score"] = 0.0
 
-            # Convert aggregated_nlp_entities from defaultdict to dict for serialization
+            data["policy_keywords_matched_counts"] = dict(data["policy_keywords_matched_counts"])
             data["aggregated_nlp_entities"] = dict(data["aggregated_nlp_entities"])
+            data["aggregated_nlp_policy_requirements"] = dict(data["aggregated_nlp_policy_requirements"])
+            # nlp_sentiment_contributions is already a dict
 
-
-        self.logger.info(f"Parsing complete with NLP. Processed data for {len(parsed_data)} MVNOs.")
+        self.logger.info(f"Parsing complete. Processed data for {len(parsed_data)} MVNOs. NLP available: {self.nlp_available}, NLP used in this run (at least once): {any(s['nlp_analysis']['nlp_used'] for mvno_data in parsed_data.values() for s in mvno_data['sources'] if 'nlp_analysis' in s)}")
 
         # Save processed data
-        timestamp_str = time.strftime("%Y%m%d-%H%M%S") # Changed variable name for clarity
+        timestamp_str = time.strftime("%Y%m%d-%H%M%S")
         filename = os.path.join(self.output_dir, f"parsed_mvno_data_{timestamp_str}.json")
         try:
             # Convert defaultdict to dict for JSON serialization
