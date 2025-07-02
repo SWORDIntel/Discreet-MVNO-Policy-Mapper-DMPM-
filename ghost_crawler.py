@@ -1,10 +1,11 @@
 import time
 import random
 import json
+import os # Added for path joining in example
 from urllib.parse import quote_plus
-# In a real scenario, you'd use the Google API client library
-# from googleapiclient.discovery import build # Example
-from ghost_config import GhostConfig # Assuming ghost_config.py is in the same directory or PYTHONPATH
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from ghost_config import GhostConfig
 
 # --- Mock Google Search API ---
 # This is a placeholder for the actual Google Search API interaction.
@@ -66,18 +67,35 @@ class GhostCrawler:
         self.config_manager = config_manager
         self.logger = self.config_manager.get_logger("GhostCrawler")
         self.google_api_key = self.config_manager.get_api_key("google_search")
-        # In a real scenario, initialize the Google Search service here
-        # if self.google_api_key:
-        #     try:
-        #         self.search_service = build("customsearch", "v1", developerKey=self.google_api_key)
-        #         self.logger.info("Google Custom Search service initialized.")
-        #     except Exception as e:
-        #         self.logger.error(f"Failed to initialize Google Custom Search service: {e}")
-        #         self.search_service = None
-        # else:
-        #     self.logger.warning("Google Search API key not found. Search functionality will be limited/mocked.")
-        #     self.search_service = None
-        self.search_service = "MOCK_SERVICE" # Using mock for this implementation
+        self.programmable_search_engine_id = self.config_manager.get("google_programmable_search_engine_id")
+        self.google_search_mode = self.config_manager.get("google_search_mode", "auto") # auto|real|mock
+        self.search_service = None
+
+        if self.google_search_mode == "real":
+            if self.google_api_key and self.programmable_search_engine_id:
+                try:
+                    self.search_service = build("customsearch", "v1", developerKey=self.google_api_key)
+                    self.logger.info("Google Custom Search service initialized for REAL mode.")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize Google Custom Search service in REAL mode: {e}. Falling back to MOCK search.")
+                    self.search_service = "MOCK_SERVICE" # Fallback identifier
+            else:
+                self.logger.warning("Google API key or Programmable Search Engine ID missing for REAL mode. Falling back to MOCK search.")
+                self.search_service = "MOCK_SERVICE" # Fallback identifier
+        elif self.google_search_mode == "mock":
+            self.logger.info("Google Search explicitly set to MOCK mode.")
+            self.search_service = "MOCK_SERVICE"
+        else: # auto mode
+            if self.google_api_key and self.programmable_search_engine_id:
+                try:
+                    self.search_service = build("customsearch", "v1", developerKey=self.google_api_key)
+                    self.logger.info("Google Custom Search service initialized for AUTO mode (real search).")
+                except Exception as e:
+                    self.logger.warning(f"Failed to initialize Google Custom Search service in AUTO mode: {e}. Using MOCK search.")
+                    self.search_service = "MOCK_SERVICE"
+            else:
+                self.logger.info("Google API key or Programmable Search Engine ID not found in AUTO mode. Using MOCK search.")
+                self.search_service = "MOCK_SERVICE"
 
         self.mvno_list_file = self.config_manager.get("mvno_list_file", "mvnos.txt")
         self.keywords_file = self.config_manager.get("keywords_file", "keywords.txt")
@@ -162,40 +180,56 @@ class GhostCrawler:
         time.sleep(actual_delay)
 
         self.logger.info(f"Performing search for: {query}")
-        try:
-            if self.search_service == "MOCK_SERVICE": # Using mock
-                # This is where you'd use the actual Google API key if not mocking
-                # For the mock, we pass the key but it's only printed
-                return mock_google_search(self.google_api_key or "NO_API_KEY_CONFIGURED", query, num_results)
+        max_retries = 3
+        backoff_factor = 2
 
-            # --- Real Google Search API call (example structure) ---
-            # if not self.search_service:
-            #     self.logger.error("Google Search service not initialized. Cannot perform search.")
-            #     return []
-            #
-            # # Note: You'd need a Programmable Search Engine ID (cx) from Google
-            # programmable_search_engine_id = self.config_manager.get("google_programmable_search_engine_id")
-            # if not programmable_search_engine_id:
-            #     self.logger.error("Google Programmable Search Engine ID (cx) not configured.")
-            #     return []
-            #
-            # result = self.search_service.cse().list(
-            #     q=query,
-            #     cx=programmable_search_engine_id,
-            #     num=num_results
-            # ).execute()
-            # return result.get('items', [])
-            # --- End Real Google Search API call ---
+        # Basic rate limiting: 10 QPS means 0.1s per query.
+        # This is a simplified approach. A more robust solution might involve a token bucket algorithm.
+        time.sleep(0.1)
 
-        except Exception as e: # pragma: no cover
-            self.logger.error(f"Error during search for '{query}': {e}")
-            return []
+        for attempt in range(max_retries):
+            try:
+                if self.search_service == "MOCK_SERVICE":
+                    self.logger.info("Using MOCK Google Search.")
+                    return mock_google_search(self.google_api_key or "NO_API_KEY_CONFIGURED", query, num_results)
+
+                if not self.search_service: # Should have been caught by init, but as a safeguard
+                    self.logger.error("Google Search service not available (was None). Switching to MOCK search for this query.")
+                    self.search_service = "MOCK_SERVICE" # Temporary switch for this call
+                    return mock_google_search(self.google_api_key or "NO_API_KEY_CONFIGURED", query, num_results)
+
+                self.logger.info("Using REAL Google Search.")
+                result = self.search_service.cse().list(
+                    q=query,
+                    cx=self.programmable_search_engine_id,
+                    num=num_results
+                ).execute()
+                return result.get('items', [])
+
+            except HttpError as e:
+                if e.resp.status in [429, 500, 503]: # Rate limit or server error
+                    wait_time = backoff_factor ** attempt + random.uniform(0, 1)
+                    self.logger.warning(f"Google Search API error (status {e.resp.status}): {e}. Retrying in {wait_time:.2f}s (attempt {attempt+1}/{max_retries}).")
+                    time.sleep(wait_time)
+                else:
+                    self.logger.error(f"Unhandled Google Search API HttpError for '{query}': {e}")
+                    return [] # Non-retryable HttpError
+            except Exception as e: # Catch other potential errors, e.g., network issues
+                self.logger.error(f"Generic error during search for '{query}' (attempt {attempt+1}/{max_retries}): {e}")
+                wait_time = backoff_factor ** attempt + random.uniform(0, 1)
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {wait_time:.2f}s.")
+                    time.sleep(wait_time)
+                else:
+                    self.logger.error(f"Max retries reached for query '{query}'. Failing this search.")
+                    return []
+        return [] # Should be unreachable if loop completes, but as a fallback
 
     def run_crawling_cycle(self, num_results_per_query: int = 5) -> str | None:
         """
         Runs a full crawling cycle:
         1. Generates search queries.
-        2. Performs searches for each query (using the mock search).
+        2. Performs searches for each query.
         3. Collects all results.
         4. Saves the aggregated raw results to a timestamped JSON file in the output directory.
 
@@ -207,12 +241,8 @@ class GhostCrawler:
                         otherwise None.
         """
         self.logger.info("Starting new crawling cycle.")
-        if not self.google_api_key and self.search_service == "MOCK_SERVICE": # Check if API key is missing for mock
-            self.logger.warning("Google Search API key is not configured. Using mock search without a key.")
-        elif not self.google_api_key: # Real service would need this # pragma: no cover
-             self.logger.error("Google Search API key is not configured. Cannot perform searches.")
-             return None
-
+        # Initial checks for API key and ID are now handled by __init__ when setting up search_service
+        # and by _perform_search for fallback during actual calls.
 
         queries = self._generate_queries()
         if not queries:

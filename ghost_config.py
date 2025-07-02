@@ -171,13 +171,104 @@ class GhostConfig:
 
         if not config_loaded_successfully:
             self.config = {
-                "api_keys": {},
+                # Core settings
+                "output_dir": "output",
+                "log_file": os.path.join("output", "ghost_app.log"), # Default log file path
+                "log_level": "INFO",
+                "ENCRYPTION_MODE": "auto", # auto | full | mock
+
+                # API Keys (sensitive, stored under "api_keys")
+                "api_keys": {
+                    "google_search": None, # Placeholder for actual key
+                },
+
+                # Crawler settings
                 "mvno_list_file": "mvnos.txt",
                 "keywords_file": "keywords.txt",
-                "output_dir": "output",
-                "ENCRYPTION_MODE": "auto" # Default encryption mode
+                "search_delay_seconds": 3,
+                "search_delay_variance_percent": 20,
+                "google_programmable_search_engine_id": "YOUR_CX_ID", # User needs to fill this
+                "google_search_mode": "auto",  # auto | real | mock
+
+                # Parser settings
+                "nlp_mode": "auto",  # auto | spacy | regex
+                "mvno_aliases": {}, # e.g., {"Old MVNO Name": "New Official Name from mvnos.txt"}
+
+                # Reporter settings
+                "alert_thresholds": {
+                    "score_change": 0.20,  # 20% change to trigger alert
+                    "new_mvno_score": 3.0  # Minimum score for a new MVNO to be considered high-score
+                },
+                "email_notification_template": (
+                    "Subject: GHOST Protocol Alert: {alert_type} for {mvno_name}\n\n"
+                    "Alert Details:\n"
+                    "Timestamp: {timestamp}\n"
+                    "MVNO: {mvno_name}\n"
+                    "Type: {alert_type}\n"
+                    "Description: {description}\n"
+                    "Current Score: {current_score}\n"
+                    "Previous Score: {previous_score}\n"
+                    "Score Change: {score_change_percentage}\n"
+                    "Source Files:\n Current: {current_data_file}\n Previous: {previous_data_file}\n"
+                ),
+
+                # Scheduler settings
+                "scheduler": {
+                    "enabled": False,
+                    "interval_hours": 24,
+                    "variance_percent": 30, # e.g. 30% of interval_hours
+                    "state_file": ".ghost_schedule_state.json", # Relative to output_dir
+                    "dead_man_switch_hours": 48, # Alert if no run in this many hours
+                    "dms_check_interval_hours": 6 # How often to check the DMS
+                }
             }
+            # Ensure default output_dir exists before trying to save config or logs there
+            # This is critical if this is the very first run and output/ doesn't exist.
+            default_output_dir = self.config.get("output_dir", "output")
+            if not os.path.exists(default_output_dir):
+                try:
+                    os.makedirs(default_output_dir)
+                    logging.info(f"Created default output directory: {default_output_dir}")
+                except Exception as e: # Fallback if creation fails (e.g. permissions)
+                    logging.error(f"CRITICAL: Could not create output directory {default_output_dir}: {e}. Config/logs may fail.")
+                    # In a real app, might raise or exit here if output_dir is essential.
+
             self.save_config() # Save a fresh config if it was reinitialized or created
+
+        # Ensure essential keys exist after loading, applying defaults if missing
+        # This helps with backward compatibility if new keys are added.
+        default_keys_structure = {
+            "output_dir": "output", "log_file": os.path.join("output", "ghost_app.log"),
+            "log_level": "INFO", "ENCRYPTION_MODE": "auto",
+            "api_keys": {}, "mvno_list_file": "mvnos.txt", "keywords_file": "keywords.txt",
+            "search_delay_seconds": 3, "search_delay_variance_percent": 20,
+            "google_programmable_search_engine_id": "YOUR_CX_ID", "google_search_mode": "auto",
+            "nlp_mode": "auto", "mvno_aliases": {},
+            "alert_thresholds": {"score_change": 0.20, "new_mvno_score": 3.0},
+            "email_notification_template": "Subject: GHOST Alert\n\n{description}",
+            "scheduler": {
+                "enabled": False, "interval_hours": 24, "variance_percent": 30,
+                "state_file": ".ghost_schedule_state.json", "dead_man_switch_hours": 48,
+                "dms_check_interval_hours": 6
+            }
+        }
+
+        needs_resave = False
+        for key, default_value in default_keys_structure.items():
+            if key not in self.config:
+                self.config[key] = default_value
+                logging.info(f"Config missing key '{key}'. Set to default: '{default_value}'")
+                needs_resave = True
+            elif isinstance(default_value, dict) and isinstance(self.config[key], dict):
+                # For nested dicts like 'scheduler' or 'alert_thresholds', check sub-keys
+                for sub_key, sub_default_value in default_value.items():
+                    if sub_key not in self.config[key]:
+                        self.config[key][sub_key] = sub_default_value
+                        logging.info(f"Config missing sub-key '{key}.{sub_key}'. Set to default: '{sub_default_value}'")
+                        needs_resave = True
+
+        if needs_resave:
+            self.save_config()
 
         # After config is loaded (or defaults set), ensure ENCRYPTION_MODE is in self.config
         if "ENCRYPTION_MODE" not in self.config:
