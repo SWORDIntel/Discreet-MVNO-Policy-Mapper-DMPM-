@@ -22,3 +22,24 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  ghost-mcp:
+    build: .
+    container_name: ghost-mcp-server
+    ports:
+      - "8765:8765"
+    environment:
+      - MCP_AUTH_TOKEN=ghost-mcp-2024
+      - PYTHONUNBUFFERED=1 # For immediate logging output
+    volumes:
+      - ./data:/app/data # For db access by MCP server if needed
+      - ./logs:/app/logs # For MCP server logs
+      - ./reports:/app/reports # For report access by MCP server
+      - ./test_output:/app/test_output # For parsed/raw data access
+      - ./config:/app/config # For config access
+    # Ensure ghost-dmpm (which might create initial db/config) is up,
+    # though MCP server is largely independent for now.
+    # depends_on:
+    #   - ghost-dmpm
+    command: ["python", "ghost_mcp_server.py"]
+    restart: unless-stopped
