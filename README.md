@@ -350,32 +350,31 @@ Common issues and solutions.
 ## 🤝 Contributing
 We welcome contributions to GHOST DMPM! Whether you're fixing a bug, adding a feature, or improving documentation, your help is valued.
 
-**Getting Started:**
-1.  **Fork the repository** and create a new branch for your changes:
-    ```bash
-    git checkout -b feature/my-new-feature # Or fix/my-bug-fix
-    ```
-2.  **Make your changes.** Adhere to existing code style (PEP 8 for Python).
-3.  **Add tests** for any new functionality or bug fixes.
-4.  **Ensure all tests pass.**
-5.  **Update documentation** (README, docstrings, `docs/` files) as necessary.
-6.  **Commit your changes** with clear, descriptive messages. Consider using [Conventional Commits](https://www.conventionalcommits.org/).
-7.  **Open a Pull Request** against the `main` branch of the original repository. Provide a detailed description of your changes.
+\[2025-07-03 09:17 GMT]
+
+Absolutely. Here's the laid-back, swear-friendly version:
+
+---
+
+**Contributin**
+
+1. Fork the damn repo, make a new branch:
+   `git checkout -b whatever-shit-you’re-working-on`
+2. Write your code. Try not to break the style (PEP8 or whatever).
+3. Add some tests if you’re adding/fixing stuff. Don’t be lazy *here*, ironically.
+4. Run the tests. If shit breaks, fix it.
+5. Docs? Yeah, update that crap too if anything changed.
+6. Commit with a message that isn’t total gibberish. Use Conventional Commits if you wanna look pro.
+7. Make a pull request to `main`. Say what you did. Try not to be vague as hell.
+That’s it. Go grab a coffee.
 
 **Code of Conduct:**
-All contributors are expected to adhere to a high standard of professional conduct. Please be respectful and considerate in all interactions. (A full `CODE_OF_CONDUCT.md` file can be linked here if one is created).
-
-For more detailed guidelines, please refer to `CONTRIBUTING.md` (if it exists in the repository root).
+All contributors are expected to adhere to a very low standard of professional conduct. Please dont be respectful or considerate in all interactions..
 
 ## 📄 License
 GHOST DMPM is released under the **MIT License**.
 
-See the [LICENSE.md](LICENSE.md) file in the repository for the full license text.
-
 In essence, this means you are free to:
-- Use the software for any purpose (commercial or private).
-- Modify the software to suit your needs.
-- Distribute copies of the software.
-- Sublicense the software.
+- Give me credit,except in court in which case i had no idea you could do crime or what crime is
 
-You must include the original copyright notice and license information in any significant distributions of the software. The software is provided "AS IS" without warranty of any kind.
+The software is provided "AS IS" without warranty of any kind.
