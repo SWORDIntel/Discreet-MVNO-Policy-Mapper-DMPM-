@@ -50,14 +50,6 @@ dev = [
 "Homepage" = "https://github.com/your-repo/ghost-dmpm" # Placeholder
 "Bug Tracker" = "https://github.com/your-repo/ghost-dmpm/issues" # Placeholder
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"] # Standard glob patterns for pytest
-python_functions = ["test_*"]
-addopts = "-v --cov=ghost_dmpm --cov-report=term-missing --cov-report=html:test_output/coverage_html"
-log_cli = true
-log_cli_level = "INFO"
-
 [tool.black]
 line-length = 88
 target-version = ['py39', 'py310', 'py311']
