@@ -8,7 +8,7 @@ import os
 import threading
 from datetime import datetime, timedelta
 
-from ghost_config import GhostConfig # For configuration access
+from ghost_dmpm.core.config import GhostConfig # For configuration access
 
 class GhostScheduler:
     """
@@ -38,10 +38,24 @@ class GhostScheduler:
         self.interval_hours = scheduler_config.get("interval_hours", 24)
         self.variance_percent = scheduler_config.get("variance_percent", 30) # e.g., 30%
 
-        self.schedule_state_file = os.path.join(
-            self.config_manager.get("output_dir", "output"), # Store state in output dir
-            scheduler_config.get("state_file", self.DEFAULT_SCHEDULE_STATE_FILE)
-        )
+        # Use project_root from config_manager to resolve paths
+        output_dir_str = self.config_manager.get("output_dir", "output") # Default relative path
+        base_output_dir_abs = self.config_manager.get_absolute_path(output_dir_str)
+
+        if not base_output_dir_abs:
+            self.logger.error(f"Scheduler output directory '{output_dir_str}' could not be resolved. State file operations will fail.")
+            self.schedule_state_file = None # Mark as unusable
+        else:
+            # No need to mkdir for base_output_dir_abs if state_file is directly under it,
+            # as _save_state does os.makedirs(os.path.dirname(self.schedule_state_file)).
+            # If state_file itself is a path like "some_subdir/.state_file", then
+            # base_output_dir_abs / "some_subdir" would need to be created.
+            # Current logic: state_file is just a name, so it's base_output_dir_abs / name.
+            # So os.makedirs for base_output_dir_abs is good.
+            base_output_dir_abs.mkdir(parents=True, exist_ok=True)
+            state_file_name = scheduler_config.get("state_file", self.DEFAULT_SCHEDULE_STATE_FILE)
+            self.schedule_state_file = base_output_dir_abs / state_file_name
+
         self.dead_man_switch_hours = scheduler_config.get("dead_man_switch_hours", self.DEFAULT_DEAD_MAN_SWITCH_HOURS)
 
         self._stop_event = threading.Event()

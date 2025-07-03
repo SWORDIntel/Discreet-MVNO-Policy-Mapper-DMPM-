@@ -1,0 +1,49 @@
+{
+  "mvno_list": [
+    "Mint Mobile",
+    "US Mobile",
+    "Visible",
+    "Cricket",
+    "Metro PCS"
+  ],
+  "keywords": [
+    "no id required",
+    "anonymous",
+    "prepaid",
+    "cash payment"
+  ],
+  "crawler": {
+    "delay_base": 2.0,
+    "delay_variance": 0.15,
+    "timeout": 30,
+    "output_dir": "test_output"
+  },
+  "parser": {
+    "output_dir": "test_output"
+  },
+  "database": {
+    "path": "data/pytest_test.db"
+  },
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false,
+    "username": "admin",
+    "password": "ghost2024"
+  },
+  "mcp_server": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "auth_token": "ghost-mcp-secret-token"
+  },
+  "logging": {
+    "level": "DEBUG",
+    "directory": "logs",
+    "file_name": "pytest_ghost.log"
+  },
+  "reports": {
+    "output_dir": "reports",
+    "alerts_log_filename": "alerts_log.json"
+  },
+  "google_search_mode": "mock"
+}

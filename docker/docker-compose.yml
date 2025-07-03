@@ -1,9 +1,11 @@
 version: '3.8'
 
 services:
-  ghost-dmpm:
-    build: .
-    container_name: ghost-dmpm-full
+  ghost-dmpm-dashboard: # Renamed service for clarity, as it runs the dashboard
+    build:
+      context: .. # Project root
+      dockerfile: docker/Dockerfile # Path to Dockerfile relative to project root
+    container_name: ghost-dmpm-dashboard
     ports:
       - "5000:5000"
     volumes:
@@ -14,17 +16,20 @@ services:
       - ./config:/app/config
     environment:
       - GHOST_OUTPUT_DIR=/app/test_output
-      - GHOST_CONFIG_FILE=/app/config/ghost_config.json
+      - GHOST_CONFIG_FILE=/app/config/ghost_config.json # App inside container looks for this
       - PYTHONUNBUFFERED=1
+    command: ["ghost-dash"] # Use the new console script for the dashboard
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"] # Changed to /api/health based on dashboard code
       interval: 30s
       timeout: 10s
       retries: 3
 
   ghost-mcp:
-    build: .
+    build:
+      context: .. # Project root
+      dockerfile: docker/Dockerfile # Path to Dockerfile relative to project root
     container_name: ghost-mcp-server
     ports:
       - "8765:8765"
@@ -40,6 +45,6 @@ services:
     # Ensure ghost-dmpm (which might create initial db/config) is up,
     # though MCP server is largely independent for now.
     # depends_on:
-    #   - ghost-dmpm
-    command: ["python", "ghost_mcp_server.py"]
+    #   - ghost-dmpm-dashboard # Depends on the renamed dashboard service
+    command: ["ghost-mcp"] # Use the new console script for the MCP server
     restart: unless-stopped

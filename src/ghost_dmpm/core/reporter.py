@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
 """GHOST Protocol Intelligence Reporter - Per Document #2, Section 4.4"""
 import json
-from datetime import datetime
+from datetime import datetime, timedelta # Ensure timedelta is imported if used
 from pathlib import Path
-from ghost_db import GhostDatabase
+from .database import GhostDatabase # Relative import for sibling module
+# from .reporter_pdf import GhostPDFGenerator # Will be used if PDF generation is added back
 
 class GhostReporter:
     def __init__(self, config):
         self.config = config
         self.logger = config.get_logger("GhostReporter")
-        self.db = GhostDatabase(config)
-        self.output_dir = Path("reports")
-        self.output_dir.mkdir(exist_ok=True)
+        self.db = GhostDatabase(config) # Assumes GhostDatabase is correctly initialized with config
+
+        # Use project_root from config to resolve the reports directory path
+        reports_dir_str = config.get("reports.output_dir", "reports") # Default relative path
+        self.output_dir = config.get_absolute_path(reports_dir_str)
+
+        if not self.output_dir:
+            self.logger.error(f"Reporter output directory '{reports_dir_str}' could not be resolved. Report generation will likely fail.")
+            # Allow to proceed, operations might fail if self.output_dir is None
+            self.alerts_log_file = None # Ensure alerts_log_file is None if output_dir is None
+        else:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            alerts_log_filename = config.get("reports.alerts_log_filename", "alerts_log.json")
+            self.alerts_log_file = self.output_dir / alerts_log_filename
+
 
     def generate_intelligence_brief(self):
         """Generate comprehensive intelligence brief"""

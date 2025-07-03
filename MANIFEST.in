@@ -1,0 +1,28 @@
+graft src
+graft tests
+graft docs
+graft examples
+graft config
+graft templates
+graft requirements
+
+include pyproject.toml
+include setup.py
+include README.md
+include LICENSE.md
+# Assuming LICENSE.md will be created or exists
+
+# Exclude common unwanted files
+global-exclude *.py[cod] __pycache__/* .DS_Store *.db
+
+# Include data and other specific files if necessary
+# Example: include data/my_data_file.dat
+# For now, keeping it simple as per the plan.
+# The .gitignore already handles /data, /logs, etc.
+# MANIFEST.in is for what to *include* in source distributions.
+# If data, logs, reports, test_output are meant to be created by the app
+# and not part of the sdist, they don't need to be here.
+# Config examples and templates are good to include.
+recursive-include config *.json.example
+recursive-include templates *.html
+recursive-include requirements *.txt

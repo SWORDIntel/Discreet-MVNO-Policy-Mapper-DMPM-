@@ -1,0 +1,257 @@
+{
+  "timestamp": "20250703_111248",
+  "search_mode": "mock",
+  "duration": 40.0585675239563,
+  "results": {
+    "Mint Mobile": [
+      {
+        "query": "Mint Mobile no id required",
+        "items": [
+          {
+            "title": "Mint Mobile - No Id Required Options",
+            "link": "https://example.com/mint-mobile/no-id-required",
+            "snippet": "Mint Mobile offers prepaid plans with no ID verification required for activation. Simply purchase a SIM card with cash at any retail location.",
+            "htmlSnippet": "<b>Mint Mobile</b> no id required"
+          }
+        ],
+        "total_results": 8801
+      },
+      {
+        "query": "Mint Mobile anonymous",
+        "items": [
+          {
+            "title": "Mint Mobile - Anonymous Options",
+            "link": "https://example.com/mint-mobile/anonymous",
+            "snippet": "Get anonymous prepaid service with Mint Mobile. No personal information needed for basic plans under $50/month.",
+            "htmlSnippet": "<b>Mint Mobile</b> anonymous"
+          }
+        ],
+        "total_results": 1941
+      },
+      {
+        "query": "Mint Mobile prepaid",
+        "items": [
+          {
+            "title": "Mint Mobile - Prepaid Options",
+            "link": "https://example.com/mint-mobile/prepaid",
+            "snippet": "Mint Mobile prepaid plans start at $15/month. Activation can be done online or in-store with minimal information.",
+            "htmlSnippet": "<b>Mint Mobile</b> prepaid"
+          }
+        ],
+        "total_results": 5450
+      },
+      {
+        "query": "Mint Mobile cash payment",
+        "items": [
+          {
+            "title": "Mint Mobile - Cash Payment Options",
+            "link": "https://example.com/mint-mobile/cash-payment",
+            "snippet": "Pay with cash at thousands of Mint Mobile retail locations. No credit check or bank account required.",
+            "htmlSnippet": "<b>Mint Mobile</b> cash payment"
+          }
+        ],
+        "total_results": 9812
+      }
+    ],
+    "US Mobile": [
+      {
+        "query": "US Mobile no id required",
+        "items": [
+          {
+            "title": "US Mobile - No Id Required Options",
+            "link": "https://example.com/us-mobile/no-id-required",
+            "snippet": "US Mobile offers prepaid plans with no ID verification required for activation. Simply purchase a SIM card with cash at any retail location.",
+            "htmlSnippet": "<b>US Mobile</b> no id required"
+          }
+        ],
+        "total_results": 5284
+      },
+      {
+        "query": "US Mobile anonymous",
+        "items": [
+          {
+            "title": "US Mobile - Anonymous Options",
+            "link": "https://example.com/us-mobile/anonymous",
+            "snippet": "Get anonymous prepaid service with US Mobile. No personal information needed for basic plans under $50/month.",
+            "htmlSnippet": "<b>US Mobile</b> anonymous"
+          }
+        ],
+        "total_results": 6636
+      },
+      {
+        "query": "US Mobile prepaid",
+        "items": [
+          {
+            "title": "US Mobile - Prepaid Options",
+            "link": "https://example.com/us-mobile/prepaid",
+            "snippet": "US Mobile prepaid plans start at $15/month. Activation can be done online or in-store with minimal information.",
+            "htmlSnippet": "<b>US Mobile</b> prepaid"
+          }
+        ],
+        "total_results": 1842
+      },
+      {
+        "query": "US Mobile cash payment",
+        "items": [
+          {
+            "title": "US Mobile - Cash Payment Options",
+            "link": "https://example.com/us-mobile/cash-payment",
+            "snippet": "Pay with cash at thousands of US Mobile retail locations. No credit check or bank account required.",
+            "htmlSnippet": "<b>US Mobile</b> cash payment"
+          }
+        ],
+        "total_results": 2376
+      }
+    ],
+    "Visible": [
+      {
+        "query": "Visible no id required",
+        "items": [
+          {
+            "title": "Visible - No Id Required Options",
+            "link": "https://example.com/visible/no-id-required",
+            "snippet": "Visible offers prepaid plans with no ID verification required for activation. Simply purchase a SIM card with cash at any retail location.",
+            "htmlSnippet": "<b>Visible</b> no id required"
+          }
+        ],
+        "total_results": 3515
+      },
+      {
+        "query": "Visible anonymous",
+        "items": [
+          {
+            "title": "Visible - Anonymous Options",
+            "link": "https://example.com/visible/anonymous",
+            "snippet": "Get anonymous prepaid service with Visible. No personal information needed for basic plans under $50/month.",
+            "htmlSnippet": "<b>Visible</b> anonymous"
+          }
+        ],
+        "total_results": 3538
+      },
+      {
+        "query": "Visible prepaid",
+        "items": [
+          {
+            "title": "Visible - Prepaid Options",
+            "link": "https://example.com/visible/prepaid",
+            "snippet": "Visible prepaid plans start at $15/month. Activation can be done online or in-store with minimal information.",
+            "htmlSnippet": "<b>Visible</b> prepaid"
+          }
+        ],
+        "total_results": 1747
+      },
+      {
+        "query": "Visible cash payment",
+        "items": [
+          {
+            "title": "Visible - Cash Payment Options",
+            "link": "https://example.com/visible/cash-payment",
+            "snippet": "Pay with cash at thousands of Visible retail locations. No credit check or bank account required.",
+            "htmlSnippet": "<b>Visible</b> cash payment"
+          }
+        ],
+        "total_results": 5629
+      }
+    ],
+    "Cricket": [
+      {
+        "query": "Cricket no id required",
+        "items": [
+          {
+            "title": "Cricket - No Id Required Options",
+            "link": "https://example.com/cricket/no-id-required",
+            "snippet": "Cricket offers prepaid plans with no ID verification required for activation. Simply purchase a SIM card with cash at any retail location.",
+            "htmlSnippet": "<b>Cricket</b> no id required"
+          }
+        ],
+        "total_results": 5658
+      },
+      {
+        "query": "Cricket anonymous",
+        "items": [
+          {
+            "title": "Cricket - Anonymous Options",
+            "link": "https://example.com/cricket/anonymous",
+            "snippet": "Get anonymous prepaid service with Cricket. No personal information needed for basic plans under $50/month.",
+            "htmlSnippet": "<b>Cricket</b> anonymous"
+          }
+        ],
+        "total_results": 470
+      },
+      {
+        "query": "Cricket prepaid",
+        "items": [
+          {
+            "title": "Cricket - Prepaid Options",
+            "link": "https://example.com/cricket/prepaid",
+            "snippet": "Cricket prepaid plans start at $15/month. Activation can be done online or in-store with minimal information.",
+            "htmlSnippet": "<b>Cricket</b> prepaid"
+          }
+        ],
+        "total_results": 8241
+      },
+      {
+        "query": "Cricket cash payment",
+        "items": [
+          {
+            "title": "Cricket - Cash Payment Options",
+            "link": "https://example.com/cricket/cash-payment",
+            "snippet": "Pay with cash at thousands of Cricket retail locations. No credit check or bank account required.",
+            "htmlSnippet": "<b>Cricket</b> cash payment"
+          }
+        ],
+        "total_results": 9879
+      }
+    ],
+    "Metro PCS": [
+      {
+        "query": "Metro PCS no id required",
+        "items": [
+          {
+            "title": "Metro PCS - No Id Required Options",
+            "link": "https://example.com/metro-pcs/no-id-required",
+            "snippet": "Metro PCS offers prepaid plans with no ID verification required for activation. Simply purchase a SIM card with cash at any retail location.",
+            "htmlSnippet": "<b>Metro PCS</b> no id required"
+          }
+        ],
+        "total_results": 1682
+      },
+      {
+        "query": "Metro PCS anonymous",
+        "items": [
+          {
+            "title": "Metro PCS - Anonymous Options",
+            "link": "https://example.com/metro-pcs/anonymous",
+            "snippet": "Get anonymous prepaid service with Metro PCS. No personal information needed for basic plans under $50/month.",
+            "htmlSnippet": "<b>Metro PCS</b> anonymous"
+          }
+        ],
+        "total_results": 7261
+      },
+      {
+        "query": "Metro PCS prepaid",
+        "items": [
+          {
+            "title": "Metro PCS - Prepaid Options",
+            "link": "https://example.com/metro-pcs/prepaid",
+            "snippet": "Metro PCS prepaid plans start at $15/month. Activation can be done online or in-store with minimal information.",
+            "htmlSnippet": "<b>Metro PCS</b> prepaid"
+          }
+        ],
+        "total_results": 3037
+      },
+      {
+        "query": "Metro PCS cash payment",
+        "items": [
+          {
+            "title": "Metro PCS - Cash Payment Options",
+            "link": "https://example.com/metro-pcs/cash-payment",
+            "snippet": "Pay with cash at thousands of Metro PCS retail locations. No credit check or bank account required.",
+            "htmlSnippet": "<b>Metro PCS</b> cash payment"
+          }
+        ],
+        "total_results": 2010
+      }
+    ]
+  }
+}

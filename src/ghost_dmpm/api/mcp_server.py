@@ -8,12 +8,11 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Add parent directory to path for imports
-# Use an absolute path resolution to be more robust
-sys.path.append(str(Path(__file__).resolve().parent))
+# Removed sys.path.append, imports will be absolute from package root
+# sys.path.append(str(Path(__file__).resolve().parent)) # Old line
 
-from ghost_config import GhostConfig
-from ghost_db import GhostDatabase
+from ghost_dmpm.core.config import GhostConfig
+from ghost_dmpm.core.database import GhostDatabase
 
 class GhostMCPServer:
     def __init__(self, config):
@@ -308,12 +307,13 @@ class GhostMCPServer:
 
     async def run_server(self, host='0.0.0.0', port=8765): # Renamed from 'run' to avoid conflict if class named 'run'
         """Start the MCP server"""
-        self.logger.info(f"Starting GHOST MCP Server v2 on ws://{host}:{port}")
+        self.logger.info(f"Starting GHOST DMPM MCP Server v2 on ws://{host}:{port}") # DMPM added for consistency
         self.logger.info(f"Health check available at ws://{host}:{port}/health (GET request or WebSocket connection)")
 
-        # Ensure logs directory exists (GhostConfig might do this, but good to be sure)
-        log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
+        # Logs directory should be handled by GhostConfig's _init_logging method
+        # which uses config.project_root. No need to create "logs" dir here explicitly.
+        # log_dir = self.config.project_root / self.config.get("logging.directory", "logs")
+        # log_dir.mkdir(parents=True, exist_ok=True) # This is done by GhostConfig
 
         server = await websockets.serve(self.serve, host, port)
         self.logger.info("Server startup complete. Waiting for connections.")
