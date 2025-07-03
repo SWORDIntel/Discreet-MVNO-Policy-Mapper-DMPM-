@@ -1,0 +1,36 @@
+=== GHOST DMPM COMPLETE DEPLOYMENT ===
+Start time: Thu Jul  3 02:51:44 UTC 2025
+Filesystem               Size  Used Avail Use% Mounted on
+overlayfs:/overlay/root  9.8G  167M  9.1G   2% /
+[02:52:15] Created ghost_config.py (3867 bytes)
+overlayfs:/overlay/root  9.8G  167M  9.1G   2% /
+[02:52:53] Created ghost_db.py (6795 bytes)
+overlayfs:/overlay/root  9.8G  167M  9.1G   2% /
+[02:53:29] Created ghost_crawler.py (5235 bytes)
+overlayfs:/overlay/root  9.8G  168M  9.1G   2% /
+[02:54:07] Created ghost_parser.py (5033 bytes)
+overlayfs:/overlay/root  9.8G  168M  9.1G   2% /
+[02:54:52] Created ghost_reporter.py (7539 bytes)
+overlayfs:/overlay/root  9.8G  169M  9.1G   2% /
+[02:55:34] Created main.py (3438 bytes)
+overlayfs:/overlay/root  9.8G  170M  9.1G   2% /
+[02:56:07] Created requirements.txt (243 bytes)
+overlayfs:/overlay/root  9.8G  170M  9.1G   2% /
+[02:56:44] Created Dockerfile (952 bytes)
+overlayfs:/overlay/root  9.8G  171M  9.1G   2% /
+[02:57:19] Created docker-compose.yml (597 bytes)
+overlayfs:/overlay/root  9.8G  172M  9.1G   2% /
+[02:57:55] Created configure_api.py (775 bytes)
+overlayfs:/overlay/root  9.8G  173M  9.1G   2% /
+[02:58:24] Created setup_environment.sh (802 bytes)
+overlayfs:/overlay/root  9.8G  174M  9.1G   2% /
+[02:58:52] Created test_deployment.py (632 bytes)
+overlayfs:/overlay/root  9.8G  174M  9.1G   2% /
+=== DEPLOYMENT SUMMARY ===
+End time: Thu Jul  3 02:59:04 UTC 2025
+Files created:
+28
+Total project size:
+2.0M	.
+Final disk status:
+overlayfs:/overlay/root  9.8G  175M  9.1G   2% /

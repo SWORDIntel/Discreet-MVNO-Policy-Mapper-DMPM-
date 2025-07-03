@@ -1,8 +1,24 @@
-version: '3'
+version: '3.8'
+
 services:
-  app:
-    image: ghost-dmpm:minimal
+  ghost-dmpm:
+    build: .
+    container_name: ghost-dmpm-full
     ports:
       - "5000:5000"
     volumes:
-      - ./data:/data
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./test_output:/app/test_output
+      - ./config:/app/config
+    environment:
+      - GHOST_OUTPUT_DIR=/app/test_output
+      - GHOST_CONFIG_FILE=/app/config/ghost_config.json
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

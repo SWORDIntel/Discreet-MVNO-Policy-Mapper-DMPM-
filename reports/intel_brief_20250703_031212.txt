@@ -1,0 +1,33 @@
+======================================================================
+GHOST PROTOCOL - MVNO INTELLIGENCE BRIEF
+======================================================================
+Classification: SENSITIVE - INTERNAL USE ONLY
+Generated: 2025-07-03T03:12:12.366553
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------
+BLUF: Visible currently offers the most lenient verification policies (score: 3.76/5.0). 5 policy changes detected in past 7 days.
+
+TOP LENIENT MVNOs
+----------------------------------------------------------------------
+ 1. Visible              Score: 3.8 - LENIENT - Basic verification only
+ 2. US Mobile            Score: 3.8 - LENIENT - Basic verification only
+ 3. Mint Mobile          Score: 3.6 - LENIENT - Basic verification only
+ 4. Cricket              Score: 3.4 - LENIENT - Basic verification only
+ 5. Metro PCS            Score: 3.3 - LENIENT - Basic verification only
+
+RECENT POLICY CHANGES
+----------------------------------------------------------------------
+• Metro PCS       NEW_MVNO             null → 3.32
+• Cricket         NEW_MVNO             null → 3.42
+• Visible         NEW_MVNO             null → 3.76
+• US Mobile       NEW_MVNO             null → 3.75
+• Mint Mobile     NEW_MVNO             null → 3.56
+
+OPERATIONAL RECOMMENDATIONS
+----------------------------------------------------------------------
+[MEDIUM] Maintain capability with: US Mobile, Mint Mobile, Cricket
+        Rationale: Viable alternatives if primary option compromised
+[ONGOING] Continue daily monitoring for policy shifts
+        Rationale: Regulatory landscape remains dynamic
+======================================================================
