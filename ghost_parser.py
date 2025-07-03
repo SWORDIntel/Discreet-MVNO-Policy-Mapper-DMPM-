@@ -723,10 +723,17 @@ class GhostParser:
         filename = os.path.join(self.output_dir, f"parsed_mvno_data_{timestamp_str}.json")
         try:
             # Convert defaultdict to dict for JSON serialization
-            serializable_data = {k: dict(v) for k, v in parsed_data.items()}
-            for mvno_data_key in serializable_data:
-                serializable_data[mvno_data_key]["policy_keywords"] = dict(serializable_data[mvno_data_key]["policy_keywords"])
-                # aggregated_nlp_entities already converted above
+            serializable_data = {}
+            for k, v_defaultdict in parsed_data.items():
+                # Convert the main defaultdict for the MVNO to a regular dict
+                v_dict = dict(v_defaultdict)
+                # Ensure nested defaultdicts are also converted
+                v_dict["policy_keywords_matched_counts"] = dict(v_defaultdict.get("policy_keywords_matched_counts", defaultdict(int)))
+                v_dict["aggregated_nlp_entities"] = dict(v_defaultdict.get("aggregated_nlp_entities", defaultdict(int)))
+                v_dict["aggregated_nlp_policy_requirements"] = dict(v_defaultdict.get("aggregated_nlp_policy_requirements", defaultdict(int)))
+                # sources list contains dicts, which are fine.
+                # nlp_sentiment_contributions is already a dict.
+                serializable_data[k] = v_dict
 
             with open(filename, "w") as f:
                 json.dump(serializable_data, f, indent=4)

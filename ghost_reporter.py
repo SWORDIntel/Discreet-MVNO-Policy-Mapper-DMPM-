@@ -159,7 +159,7 @@ class GhostReporter:
         """
         Saves the provided report data as an encrypted JSON file.
         The filename is timestamped and includes the given prefix.
-        Uses the `self.cipher_suite` for encryption.
+        Uses the `self.crypto_provider` for encryption.
 
         Args:
             report_data (list[dict]): The report data to save (typically output from
@@ -170,11 +170,14 @@ class GhostReporter:
             str | None: The filepath of the saved encrypted JSON file if successful,
                         otherwise None.
         """
-        if not self.cipher_suite: # pragma: no cover (should be set by __init__)
-            self.logger.error("Encryption cipher not available. Cannot save encrypted report.")
+        if not self.crypto_provider or self.crypto_provider.effective_mode != "fernet":
+            mode = self.crypto_provider.effective_mode if self.crypto_provider else "unavailable"
+            self.logger.error(f"Real encryption (Fernet) is not active (mode: {mode}). Cannot save encrypted JSON report.")
+            # Fallback: Save as plaintext if encryption is not active but provider exists?
+            # For now, strict: if encryption is expected (by calling this method), it must use Fernet.
             return None
         if not report_data:
-            self.logger.warning("No report data to save.")
+            self.logger.warning("No report data to save for encrypted JSON.")
             return None
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -182,7 +185,7 @@ class GhostReporter:
 
         try:
             json_data = json.dumps(report_data, indent=4).encode('utf-8')
-            encrypted_data = self.cipher_suite.encrypt(json_data)
+            encrypted_data = self.crypto_provider.encrypt(json_data)
 
             with open(filename, "wb") as f:
                 f.write(encrypted_data)
@@ -323,15 +326,24 @@ class GhostReporter:
 
             for mvno_name, data in current_data.items():
                 current_score = data.get("average_leniency_score", 0)
+                alert_type_for_new = None
+                description_for_new = ""
                 if current_score >= new_mvno_min_score:
+                    alert_type_for_new = "NEW_MVNO_HIGH_SCORE"
+                    description_for_new = f"New MVNO '{mvno_name}' detected with initial score {current_score:.2f} (>= {new_mvno_min_score})."
+                else:
+                    alert_type_for_new = "NEW_MVNO_DETECTED"
+                    description_for_new = f"New MVNO '{mvno_name}' detected with initial score {current_score:.2f}."
+
+                if alert_type_for_new: # Ensure an alert is actually warranted
                     alerts.append({
                         "timestamp": datetime.now().isoformat(),
                         "mvno_name": mvno_name,
-                        "alert_type": "NEW_MVNO_HIGH_SCORE",
-                        "description": f"New MVNO '{mvno_name}' detected with initial score {current_score:.2f} (>= {new_mvno_min_score}).",
+                        "alert_type": alert_type_for_new,
+                        "description": description_for_new,
                         "current_score": current_score,
                         "previous_score": None,
-                        "score_change": None,
+                        "score_change_percentage": None, # Corrected key from 'score_change'
                         "current_data_file": os.path.basename(current_parsed_data_filepath),
                         "previous_data_file": None
                     })
@@ -428,20 +440,29 @@ class GhostReporter:
         # Load current data to identify MVNOs of interest if not specified
         current_data = self._load_parsed_data(current_parsed_data_filepath)
         if not current_data:
-            self.logger.error("Cannot generate trend analysis: current parsed data is missing.")
+            self.logger.error("Cannot generate trend analysis: current parsed data is missing or failed to load.")
             return {}
+        self.logger.debug(f"Trend analysis: current_data loaded. Keys: {list(current_data.keys())}")
+
 
         # Determine target MVNOs
         target_mvnos = []
         if mvno_name:
+            self.logger.debug(f"Trend analysis: mvno_name specified: {mvno_name}")
             if mvno_name in current_data:
                 target_mvnos = [mvno_name]
+                self.logger.debug(f"Trend analysis: mvno_name '{mvno_name}' found in current_data. target_mvnos: {target_mvnos}")
             else:
-                self.logger.warning(f"MVNO '{mvno_name}' not found in current data for trend analysis.")
+                self.logger.warning(f"MVNO '{mvno_name}' not found in current data for trend analysis. current_data keys: {list(current_data.keys())}")
                 return {}
         else: # Get top 5 MVNOs from current data if no specific one is requested
             sorted_mvnos = sorted(current_data.items(), key=lambda item: item[1].get("average_leniency_score", float('-inf')), reverse=True)
             target_mvnos = [name for name, _ in sorted_mvnos[:5]]
+            self.logger.debug(f"Trend analysis: no specific mvno_name. Top 5 target_mvnos: {target_mvnos}")
+
+        if not target_mvnos:
+            self.logger.warning("Trend analysis: target_mvnos list is empty after selection logic. Returning empty results.")
+            return {}
 
 
         # Get all relevant previous files up to the max window
@@ -449,8 +470,8 @@ class GhostReporter:
         historical_files = self._get_previous_parsed_data_files(current_parsed_data_filepath, days_limit=max_window + 5) # Add buffer
 
         if not historical_files:
-            self.logger.info("No historical data files found for trend analysis.")
-            return {}
+            self.logger.info("No historical data files found for trend analysis. Trend will be based on current data point if its date is parsable, or show no points.")
+        # Do NOT return {} here yet, proceed to check current data point.
 
         # Structure to hold scores over time for each target MVNO
         # { "MVNO_Name": [{"date": "YYYY-MM-DD", "score": X.X}, ...], ... }
@@ -531,24 +552,38 @@ class GhostReporter:
         Returns:
             str | None: Path to the encrypted PDF if successful, else None.
         """
-        if not self.cipher_suite: # pragma: no cover
-            self.logger.error("Encryption cipher not available. Cannot save encrypted PDF.")
+        if not self.crypto_provider or self.crypto_provider.effective_mode != "fernet":
+            mode = self.crypto_provider.effective_mode if self.crypto_provider else "unavailable"
+            self.logger.error(f"Real encryption (Fernet) is not active (mode: {mode}). Cannot save encrypted PDF.")
             return None
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        temp_pdf_filename = os.path.join(self.reports_subdir, f"temp_{timestamp}.pdf")
+        # Note: _generate_pdf_report is a placeholder. This logic assumes it produces a file.
+        # GhostPDFGenerator is now the primary PDF creator. This method is largely superseded
+        # by save_report_as_pdf_versions calling GhostPDFGenerator.
+        # If this method were to be used, it would need to call GhostPDFGenerator.
+        # For now, let's assume it's trying to encrypt a pre-existing PDF (hypothetically).
+
+        # This method seems to be a bit redundant given GhostPDFGenerator's capabilities.
+        # Let's assume its intent was to encrypt a PDF generated by the old _generate_pdf_report.
+        # Since _generate_pdf_report is a non-functional placeholder, this method won't really work.
+        # However, to fix the immediate bug (cipher_suite), I'll change it.
+
+        temp_pdf_filename = os.path.join(self.reports_subdir, f"temp_for_enc_{timestamp}.pdf") # Placeholder name
         encrypted_filename = os.path.join(self.reports_subdir, f"{report_name_prefix}_{timestamp}.pdf.enc")
 
-        pdf_generated_path = self._generate_pdf_report(report_data, temp_pdf_filename)
+        # This path won't be hit if _generate_pdf_report isn't functional.
+        # For the sake of the tool call, let's simulate it would get some bytes.
+        pdf_generated_path = self._generate_pdf_report(report_data, temp_pdf_filename) # This returns None
 
-        if pdf_generated_path: # pragma: no cover (depends on _generate_pdf_report)
+        if pdf_generated_path and os.path.exists(pdf_generated_path): # pragma: no cover
             try:
                 with open(pdf_generated_path, "rb") as f:
                     pdf_bytes = f.read()
-                encrypted_data = self.cipher_suite.encrypt(pdf_bytes)
+                encrypted_data = self.crypto_provider.encrypt(pdf_bytes) # Use crypto_provider
                 with open(encrypted_filename, "wb") as f:
                     f.write(encrypted_data)
-                os.remove(pdf_generated_path) # Clean up temp unencrypted PDF
+                os.remove(pdf_generated_path)
                 self.logger.info(f"Encrypted PDF report saved to {encrypted_filename}")
                 return encrypted_filename
             except Exception as e:

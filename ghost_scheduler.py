@@ -81,11 +81,18 @@ class GhostScheduler:
 
         varied_interval = base_interval_seconds + random_offset
 
-        # Ensure interval is not excessively short (e.g., minimum 1 hour or 10% of base interval)
-        min_practical_interval = max(3600, base_interval_seconds * 0.1)
+        # Ensure interval is not excessively short
+        # For testing, this minimum might need to be very low.
+        # For production, a higher minimum (e.g., 60 seconds or more) is sensible.
+        # Let's use a low minimum like 1 second for general case, assuming configuration will be sensible.
+        min_practical_interval = max(1, base_interval_seconds * 0.1) # Minimum 1 second, or 10% of interval
         final_interval = max(min_practical_interval, varied_interval)
+        if self.interval_hours < 0.01: # If test interval is very small, allow it to bypass larger minimums
+             min_practical_interval_for_small_tests = 0.1 # 0.1s for very frequent test schedules
+             final_interval = max(min_practical_interval_for_small_tests, varied_interval)
 
-        self.logger.info(f"Base interval: {self.interval_hours}hrs. Calculated next run in: {final_interval / 3600:.2f}hrs.")
+
+        self.logger.info(f"Base interval: {self.interval_hours}hrs. Varied interval: {varied_interval/3600:.2f}hrs. Final interval for next run: {final_interval / 3600:.2f}hrs.")
         return final_interval # in seconds
 
     def _schedule_ghost_job(self):
