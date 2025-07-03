@@ -1,0 +1,13 @@
+[Unit]
+Description=GHOST DMPM MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=ghost
+WorkingDirectory=/opt/ghost-dmpm
+ExecStart=/usr/bin/python3 /opt/ghost-dmpm/ghost_mcp_server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
