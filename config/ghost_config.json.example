@@ -1,0 +1,96 @@
+{
+  "mvno_list": [
+    "Mint Mobile",
+    "US Mobile",
+    "Visible",
+    "Cricket Wireless",
+    "Metro by T-Mobile",
+    "Google Fi",
+    "Boost Mobile",
+    "Straight Talk",
+    "TracFone",
+    "Simple Mobile"
+  ],
+  "keywords": [
+    "no id required for sim",
+    "anonymous sim activation",
+    "prepaid sim privacy",
+    "cash payment for sim card",
+    "no personal information sim",
+    "encrypted communication option",
+    "vpn friendly mvno",
+    "privacy focused carrier",
+    "minimal data collection mvno",
+    "pay with cryptocurrency sim"
+  ],
+  "crawler": {
+    "delay_base": 2.5,
+    "delay_variance": 0.20,
+    "timeout": 45,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  },
+  "parser": {
+    "nlp_mode": "auto",
+    "sentiment_threshold": 0.1
+  },
+  "database": {
+    "path": "data/ghost_data.db",
+    "encryption_enabled": true,
+    "backup_path": "data/backups/"
+  },
+  "dashboard": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": false,
+    "username": "commander",
+    "password": "ghost_protocol_2024_CHANGE_ME",
+    "session_timeout_minutes": 60
+  },
+  "mcp_server": {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "auth_token": "ghost-mcp-secret-token-CHANGE_ME",
+    "max_clients": 10
+  },
+  "api_keys": {
+    "google_search": "YOUR_GOOGLE_API_KEY_HERE (leave empty for mock)",
+    "another_service": "YOUR_OTHER_API_KEY_HERE"
+  },
+  "google_search_mode": "mock",
+  "google_programmable_search_engine_id": "YOUR_GOOGLE_CX_ID_HERE (leave empty for mock)",
+  "logging": {
+    "level": "INFO",
+    "log_file_path": "logs/ghost_dmpm.log",
+    "max_file_size_mb": 10,
+    "backup_count": 5
+  },
+  "reports": {
+    "output_dir": "reports/",
+    "format": "txt",
+    "include_charts": true
+  },
+  "feature_flags": {
+    "use_advanced_analytics": true,
+    "enable_realtime_alerts": false
+  },
+  "scheduler": {
+    "enabled": true,
+    "state_file": "data/.scheduler_state.json",
+    "jobs": [
+      {
+        "name": "full_intelligence_cycle",
+        "function": "ghost_dmpm.main:main",
+        "cron_schedule": "0 3 * * *",
+        "args": [],
+        "kwargs": {}
+      },
+      {
+        "name": "daily_report",
+        "function": "ghost_dmpm.core.reporter:generate_daily_brief",
+        "cron_schedule": "0 5 * * *",
+        "args": [],
+        "kwargs": {}
+      }
+    ]
+  }
+}

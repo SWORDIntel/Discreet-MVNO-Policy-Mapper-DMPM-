@@ -20,8 +20,17 @@ from collections import defaultdict
 import base64
 
 # Initialize Flask app
-app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('GHOST_SECRET_KEY', 'ghost-protocol-2024')
+# Imports for GhostConfig will be done after project_root is available for Flask app setup
+# app = Flask(__name__) # Will be initialized in run_dashboard or after config
+# app.config['SECRET_KEY'] = os.environ.get('GHOST_SECRET_KEY', 'ghost-protocol-2024')
+# Global app instance
+app = Flask(__name__) # Initialize Flask app globally
+app.config['SECRET_KEY'] = os.environ.get('GHOST_SECRET_KEY', 'ghost-protocol-2024-default-key') # Set secret key early
+
+# Globals for other components, to be initialized by initialize_app_components
+config = None
+db = None
+logger = None
 
 # Authentication
 auth = HTTPBasicAuth()
@@ -31,31 +40,6 @@ users = {
     "commander": generate_password_hash("ghost_protocol_2024"),
     "operator": generate_password_hash("ghost_ops_2024")
 }
-
-# Initialize components with error handling
-try:
-    from ghost_config import GhostConfig
-    from ghost_db import GhostDatabase
-    config = GhostConfig()
-    db = GhostDatabase(config)
-except ImportError:
-    # Fallback for minimal deployment
-    class MockConfig:
-        def get(self, key, default=None):
-            return {
-                'output_dir': 'data',
-                'google_search_mode': 'mock',
-                'scheduler': {'enabled': False}
-            }.get(key, default)
-
-        def get_logger(self, name):
-            return logging.getLogger(name)
-
-    config = MockConfig()
-    db = None
-
-# Setup logging
-logger = config.get_logger("GhostDashboard")
 
 # Global stats cache
 stats_cache = {
@@ -80,9 +64,30 @@ def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
 # Helper functions
+def _get_data_dir_path():
+    """Helper to get the absolute path to the data/output directory."""
+    if not config:
+        # This case should ideally not happen if config is initialized early
+        logger.error("Config not initialized when trying to get data_dir_path.")
+        return Path('data') # Fallback, potentially problematic
+    # Assuming 'output_dir' in config is relative to project_root
+    # or that config.get already handles this if it's a special path.
+    # For consistency with other modules, we resolve it against project_root.
+    # Changed to use get_absolute_path for robustness.
+    output_dir_str = config.get('output_dir', 'data') # Default relative path
+    abs_path = config.get_absolute_path(output_dir_str)
+    if not abs_path:
+        logger.error(f"Dashboard data directory '{output_dir_str}' could not be resolved. Operations may fail.")
+        # Fallback to a relative Path object, which might work if CWD is project root.
+        return Path(output_dir_str)
+    return abs_path
+
 def _get_latest_file(pattern):
-    """Get most recent file matching pattern"""
-    files = glob.glob(os.path.join(config.get('output_dir', 'data'), pattern))
+    """Get most recent file matching pattern from the data directory."""
+    data_dir = _get_data_dir_path()
+    # Ensure data_dir is Path object for globbing
+    search_path = Path(data_dir) / pattern
+    files = glob.glob(str(search_path)) # glob expects string path
     return max(files, key=os.path.getctime) if files else None
 
 def _file_age(filepath):
@@ -198,29 +203,31 @@ def system_status():
 
     # Check scheduler status
     scheduler_status = 'Unknown'
-    scheduler_pid_file = os.path.join(config.get('output_dir', 'data'), 'scheduler.pid')
-    if os.path.exists(scheduler_pid_file):
+    scheduler_pid_file = _get_data_dir_path() / 'scheduler.pid'
+    if scheduler_pid_file.exists():
         try:
             with open(scheduler_pid_file, 'r') as f:
                 pid = int(f.read().strip())
-                # Check if process is running
-                os.kill(pid, 0)
+                os.kill(pid, 0) # Check if process is running
                 scheduler_status = 'Running'
-        except:
+        except (OSError, ValueError, TypeError): # More specific exceptions
             scheduler_status = 'Stopped'
+    else:
+        scheduler_status = 'Not Found'
+
 
     return jsonify({
         'status': 'OPERATIONAL',
         'timestamp': datetime.now().isoformat(),
         'last_crawl': _file_age(latest_crawl),
         'last_parse': _file_age(latest_parsed),
-        'api_mode': config.get('google_search_mode', 'unknown'),
-        'encryption_mode': 'ENABLED' if hasattr(config, 'cipher_suite') else 'PLAINTEXT',
+        'api_mode': config.get('google_search_mode', 'unknown') if config else 'unknown',
+        'encryption_mode': 'ENABLED' if config and hasattr(config, 'features') and config.features.get('encryption') else 'PLAINTEXT',
         'scheduler_status': scheduler_status,
-        'scheduler_enabled': config.get('scheduler', {}).get('enabled', False),
+        'scheduler_enabled': config.get('scheduler.enabled', False) if config else False,
         'metrics': metrics,
-        'data_directory': config.get('output_dir', 'data'),
-        'version': '1.0.0'
+        'data_directory': str(_get_data_dir_path()),
+        'version': '1.0.0' # TODO: Get from __version__
     })
 
 @app.route('/api/mvnos/top/<int:n>')
@@ -304,8 +311,8 @@ def recent_alerts():
     days = request.args.get('days', 7, type=int)
     alert_type = request.args.get('type', None)
 
-    alerts_file = os.path.join(config.get('output_dir', 'data'), 'alerts_log.json')
-    if not os.path.exists(alerts_file):
+    alerts_file = _get_data_dir_path() / 'alerts_log.json' # Path object
+    if not alerts_file.exists():
         return jsonify({'alerts': [], 'total': 0})
 
     try:
@@ -394,8 +401,8 @@ def mvno_trends(mvno):
 @auth.login_required
 def list_reports():
     """List available reports"""
-    reports_dir = os.path.join(config.get('output_dir', 'data'), 'reports')
-    if not os.path.exists(reports_dir):
+    reports_dir = _get_data_dir_path() / 'reports' # Path object
+    if not reports_dir.exists():
         return jsonify({'reports': []})
 
     try:
@@ -427,9 +434,13 @@ def system_logs():
     """Get recent system logs"""
     lines = request.args.get('lines', 100, type=int)
 
-    log_files = glob.glob(os.path.join(config.get('output_dir', 'data'), '*.log'))
+    # Assuming logs are in project_root/logs as per GhostConfig changes
+    log_dir_path = config.project_root / config.get("logging.directory", "logs") if config else Path("logs")
+    log_pattern = config.get("logging.file_name_pattern", "*.log") # e.g. ghost_*.log or just *.log
+    log_files = glob.glob(str(log_dir_path / log_pattern))
+
     if not log_files:
-        return jsonify({'logs': [], 'message': 'No log files found'})
+        return jsonify({'logs': [], 'message': f'No log files found in {log_dir_path} matching {log_pattern}'})
 
     try:
         # Get most recent log file
@@ -455,7 +466,8 @@ def crawler_status():
     """Get detailed crawler statistics"""
     try:
         # Find all raw results files
-        raw_files = glob.glob(os.path.join(config.get('output_dir', 'data'), 'raw_search_results_*.json'))
+        raw_files_pattern = _get_data_dir_path() / 'raw_search_results_*.json'
+        raw_files = glob.glob(str(raw_files_pattern))
 
         if not raw_files:
             return jsonify({
@@ -503,16 +515,18 @@ def get_config():
     """Get current configuration (sanitized)"""
     try:
         # Get config but hide sensitive values
-        safe_config = {
-            'output_dir': config.get('output_dir', 'data'),
-            'google_search_mode': config.get('google_search_mode', 'unknown'),
-            'search_delay_seconds': config.get('search_delay_seconds', 5),
-            'scheduler': config.get('scheduler', {}),
-            'alert_thresholds': config.get('alert_thresholds', {}),
-            'log_level': config.get('log_level', 'INFO'),
-            'api_key_configured': bool(config.get('api_keys', {}).get('google_search'))
-        }
+        if not config:
+            return jsonify({'error': 'Configuration not loaded'}), 500
 
+        safe_config = {
+            'output_dir': str(_get_data_dir_path()), # Show absolute path for clarity
+            'google_search_mode': config.get('google_search_mode', 'unknown'),
+            'crawler_delay_base': config.get('crawler.delay_base', 2.0),
+            'scheduler_enabled': config.get('scheduler.enabled', False),
+            'alert_thresholds': config.get('alerts.thresholds', {}), # Example path
+            'logging_level': config.get('logging.level', 'INFO'),
+            'api_key_configured': bool(config.get('api_keys.google_search'))
+        }
         return jsonify(safe_config)
     except Exception as e:
         logger.error(f"Error getting config: {e}")
@@ -607,9 +621,12 @@ def toggle_scheduler():
         new_state = not current_state
 
         # Update config
-        scheduler_config = config.get('scheduler', {})
-        scheduler_config['enabled'] = new_state
-        config.set('scheduler', scheduler_config)
+        if not config:
+            return jsonify({'error': 'Configuration not loaded'}), 500
+
+        # Assuming config.set works as expected after project_root integration
+        # This part might need careful testing with how GhostConfig saves changes.
+        config.set('scheduler.enabled', new_state) # Set specific key
 
         return jsonify({
             'previous_state': current_state,
@@ -631,16 +648,121 @@ def handle_exception(e):
     }), 500
 
 # CLI integration
-def run_dashboard(host='0.0.0.0', port=5000, debug=False):
-    """Run the dashboard with specified settings"""
-    logger.info(f"Starting GHOST Dashboard on {host}:{port}")
-    app.run(host=host, port=port, debug=debug)
+def initialize_app_components():
+    """Initialize global config, db, logger, and Flask app for the dashboard."""
+    global app, config, db, logger
+
+    # Standard library imports that were at top-level
+    from pathlib import Path # Moved here as it's used by _get_data_dir_path called by Flask routes
+
+    try:
+        from ghost_dmpm.core.config import GhostConfig
+        from ghost_dmpm.core.database import GhostDatabase
+
+        # project_root for GhostConfig will be auto-determined if not passed.
+        # For Flask template_folder, we need project_root explicitly.
+        # Let's determine project_root once.
+        # A simple way for a module in src/ghost_dmpm/api to find project root:
+        # Assuming this file is src/ghost_dmpm/api/dashboard.py
+        # project_root_path = Path(__file__).resolve().parent.parent.parent
+        # However, GhostConfig already does this, so we can instantiate it first.
+
+        config = GhostConfig() # Auto-determines project_root
+
+        # Initialize Flask app with correct template folder
+        # template_folder should be project_root/templates
+        template_folder_abs = config.project_root / "templates"
+        # static_folder_abs = config.project_root / "static" # If you have a root static folder
+
+        app = Flask(__name__, template_folder=str(template_folder_abs))
+        app.config['SECRET_KEY'] = os.environ.get('GHOST_SECRET_KEY', config.get('dashboard.secret_key', 'ghost-protocol-2024-default-key'))
+
+        if db is None and config.get("database.path"): # Initialize db if path is configured
+            db = GhostDatabase(config)
+
+        logger = config.get_logger("GhostDashboard")
+        logger.info("Dashboard components initialized.")
+
+    except ImportError as e:
+        # Fallback for minimal deployment or if core components are missing
+        # This part needs to be carefully managed if such a fallback is truly desired.
+        # For now, let's log the error and potentially raise it or exit.
+        logging.basicConfig(level=logging.INFO) # Basic logging if config failed
+        logger = logging.getLogger("GhostDashboard_Fallback")
+        logger.error(f"Failed to import core GHOST DMPM components: {e}", exc_info=True)
+        logger.error("Dashboard will run in a degraded mode or fail to start if core components are essential.")
+        # To actually run in degraded mode, MockConfig and MockDB would be needed here.
+        # For now, assume core components are necessary.
+        # If GhostConfig fails, the app might not be usable, but routes should still register.
+        # raise RuntimeError(f"Failed to initialize dashboard due to missing core components: {e}")
+        # Instead of raising, let it proceed; some routes might work or show errors gracefully.
+        pass # Allow app to run in a very degraded state if config fails.
+
+
+def run_dashboard(host=None, port=None, debug=None):
+    """Run the dashboard with specified settings, loading from config if not provided."""
+    # Initialize components if not already done (e.g. if run directly via __main__)
+    if config is None: # A proxy for checking if initialize_app_components has run successfully
+        try:
+            initialize_app_components()
+        except RuntimeError as e:
+            # If core components (like GhostConfig) are absolutely essential for even basic app run,
+            # then we might need to stop here. For now, assume app can start and show errors.
+            if logger: # logger might be None if initialize_app_components failed early
+                logger.critical(f"Dashboard cannot start due to core component initialization failure: {e}", exc_info=True)
+            else: # Basic print if logger itself failed
+                print(f"CRITICAL: Dashboard cannot start due to core component initialization failure: {e}", file=sys.stderr)
+            # Depending on desired behavior, either sys.exit(1) or let Flask try to run (might fail).
+            # For robustness in a web server context, usually you'd let it start and serve error pages.
+            # However, if config is None, many routes will fail badly.
+            # Let's make initialize_app_components more resilient or ensure it's always called once.
+            # The current structure with global 'app' and 'config' initialized by initialize_app_components
+            # means this function is the main entry point to ensure they are set.
+            # If initialize_app_components itself raises RuntimeError, it won't get here.
+            # The concern is if it completes but 'config' remains None.
+            # The modified initialize_app_components tries to prevent config from being None
+            # by having a fallback (though that fallback is now removed).
+            # If GhostConfig fails, config will be None.
+            if not config: # Check again after initialize_app_components
+                print("FATAL: GhostConfig failed to initialize. Dashboard cannot run.", file=sys.stderr)
+                sys.exit(1)
+
+
+    # Get config values if not passed as arguments
+    # These defaults in config.get are for when the key itself is missing from ghost_config.json
+    # The environment variables provide overrides.
+    final_host = host if host is not None else os.environ.get('GHOST_DASHBOARD_HOST', config.get('dashboard.host', '0.0.0.0'))
+    final_port = port if port is not None else int(os.environ.get('GHOST_DASHBOARD_PORT', config.get('dashboard.port', 5000)))
+    final_debug = debug if debug is not None else os.environ.get('GHOST_DEBUG', str(config.get('dashboard.debug', False))).lower() == 'true'
+
+    # Update users from config if available
+    global users
+    config_users = config.get('dashboard.users')
+    if isinstance(config_users, dict):
+        users = {u: generate_password_hash(p) for u, p in config_users.items()}
+        logger.info(f"Loaded {len(users)} users from configuration for dashboard.")
+    else:
+        # Fallback to default users if not in config or wrong type
+        users = {
+            "commander": generate_password_hash(config.get('dashboard.default_password_commander', "ghost_protocol_2024")),
+            "operator": generate_password_hash(config.get('dashboard.default_password_operator', "ghost_ops_2024"))
+        }
+        logger.info("Using default dashboard users as 'dashboard.users' not found or invalid in config.")
+
+
+    logger.info(f"Starting GHOST Dashboard on http://{final_host}:{final_port} (Debug: {final_debug})")
+
+    # Note: app.run() is not recommended for production. Use a WSGI server like Gunicorn.
+    app.run(host=final_host, port=final_port, debug=final_debug)
 
 if __name__ == '__main__':
-    # Get configuration from environment
-    host = os.environ.get('GHOST_DASHBOARD_HOST', '0.0.0.0')
-    port = int(os.environ.get('GHOST_DASHBOARD_PORT', 5000))
-    debug = os.environ.get('GHOST_DEBUG', 'false').lower() == 'true'
+    # This block is for direct execution (python src/ghost_dmpm/api/dashboard.py)
+    # It should correctly find its way to project_root via GhostConfig's internal logic.
+    # initialize_app_components() # This is now called at the start of run_dashboard if needed
+
+    # Default users might be updated by run_dashboard if configured in ghost_config.json
+    default_user_display = list(users.keys())[0] if users else "commander"
+    default_pass_display = "CONFIGURED_PASSWORD" # Avoid printing actual default password
 
     print(f"""
     ╔═══════════════════════════════════════╗
@@ -648,10 +770,9 @@ if __name__ == '__main__':
     ╚═══════════════════════════════════════╝
 
     Starting dashboard server...
-    URL: http://{host}:{port}
-    Auth: commander / ghost_protocol_2024
+    Auth: Default user '{default_user_display}' / Password '{default_pass_display}' (Check config)
+    (Further details like URL will be printed by run_dashboard)
 
     Press Ctrl+C to stop
     """)
-
-    run_dashboard(host=host, port=port, debug=debug)
+    run_dashboard() # Uses configured or default host/port/debug

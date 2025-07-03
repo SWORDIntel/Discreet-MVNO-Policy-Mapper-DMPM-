@@ -13,7 +13,7 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
-from ghost_config import GhostConfig # For accessing crypto_provider if passed
+from .config import GhostConfig # For accessing crypto_provider if passed
 
 class GhostPDFGenerator:
     def __init__(self, config_manager: GhostConfig, logger):

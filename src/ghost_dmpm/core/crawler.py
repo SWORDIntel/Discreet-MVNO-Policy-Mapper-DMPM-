@@ -12,8 +12,17 @@ class GhostCrawler:
     def __init__(self, config):
         self.config = config
         self.logger = config.get_logger("GhostCrawler")
-        self.output_dir = Path("test_output")
-        self.output_dir.mkdir(exist_ok=True)
+
+        # Use project_root from config to resolve the output directory path
+        # Allow overriding via config file, e.g., crawler.output_dir
+        output_dir_str = config.get("crawler.output_dir", "test_output") # Default relative path
+        self.output_dir = config.get_absolute_path(output_dir_str)
+
+        if not self.output_dir:
+            self.logger.error(f"Crawler output directory '{output_dir_str}' could not be resolved. Crawler outputs will likely fail.")
+            # Allow to proceed, operations might fail if self.output_dir is None
+        else:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # API configuration
         self.api_key = config.get_api_key("google_search")

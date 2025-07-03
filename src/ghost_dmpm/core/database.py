@@ -9,9 +9,18 @@ from pathlib import Path
 class GhostDatabase:
     def __init__(self, config):
         self.config = config
-        self.db_path = Path(config.get("database.path", "data/ghost_data.db"))
+        self.logger = config.get_logger("GhostDB") # Init logger first
+
+        db_path_str = config.get("database.path", "data/ghost_data.db") # Get configured path or default
+        self.db_path = config.get_absolute_path(db_path_str)
+
+        if not self.db_path:
+            self.logger.error(f"Database path '{db_path_str}' could not be resolved. Database operations will likely fail.")
+            # Potentially raise an error here or let operations fail later
+            # For now, allow it to proceed, operations will fail if db_path is None
+            return
+
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.logger = config.get_logger("GhostDB")
         self._init_db()
 
     def _init_db(self):
