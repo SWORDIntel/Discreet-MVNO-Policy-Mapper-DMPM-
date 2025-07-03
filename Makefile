@@ -30,7 +30,7 @@ test-integration:
 	pytest tests/integration/ -v
 
 test-coverage:
-	pytest tests/ --cov=ghost_dmpm --cov-report=html --cov-report=term
+	pytest tests/ -v --cov=ghost_dmpm --cov-report=term-missing --cov-report=html:test_output/coverage_html
 
 run:
 	python main.py
