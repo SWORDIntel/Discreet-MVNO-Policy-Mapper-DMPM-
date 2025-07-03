@@ -1,2 +1,5 @@
 cryptography>=38.0.0
 spacy>=3.4.0
+openpyxl>=3.0.0 # For Excel export
+reportlab>=3.6.0 # For PDF export
+Jinja2>=3.0.0 # For HTML template-based export

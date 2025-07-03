@@ -45,10 +45,11 @@ class GhostMCPServer:
                     self.logger.error(f"Health check: Database stat query failed: {db_exc}")
                     db_status_text = "degraded"
 
+                from ghost_dmpm import __version__ as app_version
                 health_status = {
                     "status": "healthy", # Overall status, can be changed if critical components fail
                     "timestamp": datetime.now().isoformat(),
-                    "version": "2.0.0", # Updated version
+                    "version": app_version,
                     "uptime": self.get_uptime(),
                     "components": {
                         "database": db_status_text,
@@ -160,8 +161,10 @@ class GhostMCPServer:
             response["result"] = result
         return response
 
-    async def serve(self, websocket, path):
+    async def serve(self, websocket): # Removed path from signature
         """Handle WebSocket connections"""
+        path = websocket.request.path # Get path from the request object
+
         # Health check is a special case, doesn't follow JSON-RPC message structure
         if await self.health_check_handler(websocket, path):
             # health_check_handler closes the websocket itself
@@ -205,10 +208,25 @@ class GhostMCPServer:
         else:
             return "STRINGENT - Enhanced verification"
 
-    async def get_top_mvnos(self, n=10):
+    async def get_top_mvnos(self, n=None): # Default n handled by params.get later
         """Get top N lenient MVNOs from database"""
-        self.logger.info(f"Executing get_top_mvnos with n={n}")
-        mvnos_data = self.db.get_top_mvnos(n)
+        # Validate n
+        max_n = self.config.get("mcp_server.max_get_top_mvnos", 100)
+        default_n = self.config.get("mcp_server.default_get_top_mvnos", 10)
+
+        if n is None:
+            n_val = default_n
+        else:
+            try:
+                n_val = int(n)
+            except (ValueError, TypeError):
+                return {"error": f"Parameter 'n' must be an integer."}
+
+        if not 1 <= n_val <= max_n:
+            return {"error": f"Parameter 'n' must be between 1 and {max_n}."}
+
+        self.logger.info(f"Executing get_top_mvnos with n={n_val}")
+        mvnos_data = self.db.get_top_mvnos(n_val)
 
         return {
             "mvnos": [
@@ -225,13 +243,16 @@ class GhostMCPServer:
             # "generated_at" removed, now part of _format_response wrapper
         }
 
-    async def search_mvno(self, mvno_name):
+    async def search_mvno(self, mvno_name=None):
         """Search for a specific MVNO by name"""
-        self.logger.info(f"Executing search_mvno for {mvno_name}")
-        if not mvno_name:
-            return {"error": "MVNO name not provided."} # This will be wrapped by _format_response
+        if not mvno_name or not isinstance(mvno_name, str) or not mvno_name.strip():
+            return {"error": "Parameter 'mvno_name' must be a non-empty string."}
 
-        mvno_data = self.db.get_mvno_by_name(mvno_name)
+        # Optional: Sanitize or limit length if necessary
+        # mvno_name = mvno_name.strip()[:100] # Example: trim and limit length
+
+        self.logger.info(f"Executing search_mvno for {mvno_name}")
+        mvno_data = self.db.get_mvno_by_name(mvno_name.strip())
         if mvno_data:
             return {
                 "mvno": {
@@ -248,10 +269,24 @@ class GhostMCPServer:
             # This structure is fine, handle_message will wrap it with "error" key if needed
             return {"error": f"MVNO '{mvno_name}' not found."}
 
-    async def get_recent_alerts(self, days=7):
+    async def get_recent_alerts(self, days=None): # Default days handled by params.get later
         """Get recent policy changes/alerts"""
-        self.logger.info(f"Executing get_recent_alerts for last {days} days")
-        changes_data = self.db.get_recent_changes(days)
+        default_days = self.config.get("mcp_server.default_alert_days", 7)
+        max_days = self.config.get("mcp_server.max_alert_days", 90)
+
+        if days is None:
+            days_val = default_days
+        else:
+            try:
+                days_val = int(days)
+            except (ValueError, TypeError):
+                return {"error": "Parameter 'days' must be an integer."}
+
+        if not 1 <= days_val <= max_days:
+            return {"error": f"Parameter 'days' must be between 1 and {max_days}."}
+
+        self.logger.info(f"Executing get_recent_alerts for last {days_val} days")
+        changes_data = self.db.get_recent_changes(days_val)
 
         return {
             "alerts": [
@@ -268,15 +303,31 @@ class GhostMCPServer:
             # "generated_at" removed
         }
 
-    async def get_mvno_trend(self, mvno_name, days=30):
+    async def get_mvno_trend(self, mvno_name=None, days=None): # Defaults handled by params.get
         """Get policy trend for a specific MVNO over a period"""
-        self.logger.info(f"Executing get_mvno_trend for {mvno_name} over {days} days")
-        if not mvno_name:
-            return {"error": "MVNO name not provided."}
+        default_days = self.config.get("mcp_server.default_trend_days", 30)
+        max_days = self.config.get("mcp_server.max_trend_days", 365)
 
-        history_data = self.db.get_mvno_policy_history(mvno_name, days)
+        if not mvno_name or not isinstance(mvno_name, str) or not mvno_name.strip():
+            return {"error": "Parameter 'mvno_name' must be a non-empty string."}
+
+        # mvno_name_val = mvno_name.strip()[:100] # Optional sanitize/limit
+
+        if days is None:
+            days_val = default_days
+        else:
+            try:
+                days_val = int(days)
+            except (ValueError, TypeError):
+                return {"error": "Parameter 'days' must be an integer."}
+
+        if not 1 <= days_val <= max_days:
+            return {"error": f"Parameter 'days' must be between 1 and {max_days}."}
+
+        self.logger.info(f"Executing get_mvno_trend for {mvno_name.strip()} over {days_val} days")
+        history_data = self.db.get_mvno_policy_history(mvno_name.strip(), days_val)
         return {
-            "mvno_name": mvno_name,
+            "mvno_name": mvno_name.strip(),
             "trend": [
                 {
                     "timestamp": record['crawl_timestamp'],

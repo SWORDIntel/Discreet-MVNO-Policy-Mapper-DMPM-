@@ -42,15 +42,34 @@
     "host": "0.0.0.0",
     "port": 5000,
     "debug": false,
-    "username": "commander",
-    "password": "ghost_protocol_2024_CHANGE_ME",
-    "session_timeout_minutes": 60
+    # Default admin user. For multiple users, use the "users" dictionary below.
+    # "username": "admin",
+    # "password": "ghost2024_CHANGE_ME_PLEASE",
+    "users": {
+        "admin": "some_secure_password_hash_or_plain_text_if_app_hashes_on_load",
+        "commander": "another_secure_password"
+    },
+    "default_password_admin": "ghost2024_CHANGE_ME_PLEASE", # Used if "users" dict is missing or admin not in it
+    "session_timeout_minutes": 60,
+    "cache_duration_seconds": 60,
+    "max_top_mvnos": 50,
+    "messages": {
+        "crawl_triggered": "Crawl cycle initiated by dashboard request.",
+        "scheduler_toggled_on": "Scheduler enabled via dashboard.",
+        "scheduler_toggled_off": "Scheduler disabled via dashboard."
+    }
   },
   "mcp_server": {
     "host": "0.0.0.0",
     "port": 8765,
     "auth_token": "ghost-mcp-secret-token-CHANGE_ME",
-    "max_clients": 10
+    "max_clients": 10,
+    "max_get_top_mvnos": 100,
+    "default_get_top_mvnos": 10,
+    "default_alert_days": 7,
+    "max_alert_days": 90,
+    "default_trend_days": 30,
+    "max_trend_days": 365
   },
   "api_keys": {
     "google_search": "YOUR_GOOGLE_API_KEY_HERE (leave empty for mock)",
@@ -75,7 +94,8 @@
   },
   "scheduler": {
     "enabled": true,
-    "state_file": "data/.scheduler_state.json",
+    "pid_file": "data/scheduler.pid", // PID file for the scheduler process
+    "state_file": "data/.scheduler_state.json", // For future use: persisting dynamic job states
     "jobs": [
       {
         "name": "full_intelligence_cycle",
@@ -92,5 +112,40 @@
         "kwargs": {}
       }
     ]
+  },
+  "webhooks": {
+    "slack_url": null,
+    "discord_url": null,
+    "email_smtp": {
+      "host": "smtp.example.com",
+      "port": 587,
+      "username": "your_email_username",
+      "password": "your_email_password_or_app_token",
+      "sender_email": "notifications@ghostdmpm.example.com",
+      "use_tls": true
+    },
+    "timeout": 10,
+    "retries": 3
+  },
+  "export": {
+    "default_format": "json",
+    "csv_include_headers": true,
+    "json_pretty_print": true,
+    "excel_sheet_name_prefix": "GHOST_Export_",
+    "pdf_report_title": "GHOST DMPM Exported Report",
+    "html_template_dir": "templates/export/",
+    "output_directory": "exports/"
+  },
+  "analytics": {
+    "trend_window_size": 7,
+    "trend_up_threshold": 1.05,
+    "trend_down_threshold": 0.95,
+    "anomaly_days_history": 30,
+    "anomaly_std_dev_multiplier": 2.0,
+    "anomaly_min_data_points": 5,
+    "prediction_days_history": 14,
+    "score_min_range": 0.0,
+    "score_max_range": 5.0,
+    "viz_days_history": 30
   }
 }
