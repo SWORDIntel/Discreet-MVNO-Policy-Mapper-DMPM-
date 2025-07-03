@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GHOST DMPM Operations Dashboard</title>
+    <style>
+        :root {
+            --primary: #00ff00;
+            --secondary: #00ffff;
+            --warning: #ffff00;
+            --danger: #ff0000;
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #2a2a2a;
+            --text-primary: #00ff00;
+            --text-secondary: #00cc00;
+            --border: #333;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .header h1 {
+            font-size: 1.8em;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px var(--primary);
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-top: 10px;
+        }
+
+        /* Grid System */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .grid-full {
+            grid-column: 1 / -1;
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+            padding: 20px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .panel:hover {
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel h3 {
+            color: var(--primary);
+            font-size: 1.2em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Status Indicators */
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-ok { background: var(--primary); }
+        .status-warn { background: var(--warning); }
+        .status-error { background: var(--danger); }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* Buttons */
+        .btn {
+            background: var(--primary);
+            color: var(--bg-primary);
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9em;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: var(--text-secondary);
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        .btn:disabled {
+            background: var(--border);
+            cursor: not-allowed;
+        }
+
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 0.8em;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+        }
+
+        /* Lists */
+        .mvno-list {
+            list-style: none;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .mvno-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s ease;
+        }
+
+        .mvno-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .mvno-name {
+            font-weight: bold;
+            color: var(--secondary);
+        }
+
+        .mvno-score {
+            font-size: 1.2em;
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        .mvno-trend {
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+
+        .trend-rising { color: var(--primary); }
+        .trend-falling { color: var(--danger); }
+        .trend-stable { color: var(--warning); }
+
+        /* Alerts */
+        .alert-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .alert-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 4px solid var(--warning);
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+
+        .alert-type-NEW_MVNO { border-left-color: var(--secondary); }
+        .alert-type-POLICY_TIGHTENED { border-left-color: var(--danger); }
+        .alert-type-POLICY_RELAXED { border-left-color: var(--primary); }
+
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .alert-type {
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.9em;
+        }
+
+        .alert-time {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+
+        /* Metrics */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+
+        .metric {
+            background: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .metric-label {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        /* Logs */
+        .log-viewer {
+            background: #000;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Search */
+        .search-container {
+            margin-bottom: 20px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--primary);
+            color: var(--text-primary);
+            font-family: inherit;
+            border-radius: 4px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--primary);
+        }
+
+        /* Charts */
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .metric-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            position: relative;
+            background: var(--bg-secondary);
+            margin: 50px auto;
+            padding: 30px;
+            width: 90%;
+            max-width: 600px;
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1.5em;
+            cursor: pointer;
+        }
+
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--primary);
+            border-radius: 4px;
+            animation: slideIn 0.3s ease;
+            z-index: 2000;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>GHOST DMPM OPERATIONS</h1>
+                <div class="header-status">
+                    <div id="system-status">
+                        <span class="status-indicator status-ok"></span>
+                        <span>System: <span id="status-text">Initializing...</span></span>
+                    </div>
+                    <div id="api-mode">API: <span id="api-mode-text">-</span></div>
+                    <div id="last-update">Updated: <span id="update-time">-</span></div>
+                </div>
+            </div>
+            <div>
+                <button class="btn btn-secondary" onclick="showDiskUsage()">Disk Usage</button>
+                <button class="btn btn-secondary" onclick="showLogs()">View Logs</button>
+                <button class="btn" onclick="refreshAll()">Refresh All</button>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid">
+            <!-- Top MVNOs Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Top Lenient MVNOs</h3>
+                    <div>
+                        <button class="btn btn-small" onclick="loadTopMVNOs()">Refresh</button>
+                        <button class="btn btn-small btn-secondary" onclick="showMVNOSearch()">Search</button>
+                    </div>
+                </div>
+                <div id="mvno-container">
+                    <ul id="mvno-list" class="mvno-list">
+                        <li class="loading"><div class="spinner"></div></li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Recent Alerts Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Recent Alerts</h3>
+                    <div>
+                        <select id="alert-filter" onchange="loadAlerts()">
+                            <option value="">All Types</option>
+                            <option value="NEW_MVNO">New MVNO</option>
+                            <option value="POLICY_TIGHTENED">Policy Tightened</option>
+                            <option value="POLICY_RELAXED">Policy Relaxed</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="alerts-container" class="alert-list">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+
+            <!-- System Metrics Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>System Metrics</h3>
+                    <button class="btn btn-small" onclick="loadSystemStatus()">Refresh</button>
+                </div>
+                <div class="metric-grid">
+                    <div class="metric">
+                        <div class="metric-label">Last Crawl</div>
+                        <div class="metric-value" id="last-crawl">-</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Last Parse</div>
+                        <div class="metric-value" id="last-parse">-</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Disk Usage</div>
+                        <div class="metric-value" id="disk-usage">-</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Scheduler</div>
+                        <div class="metric-value" id="scheduler-status">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Crawler Status Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>Crawler Statistics</h3>
+                    <button class="btn btn-small" onclick="loadCrawlerStatus()">Refresh</button>
+                </div>
+                <div id="crawler-stats">
+                    <div class="metric-grid">
+                        <div class="metric">
+                            <div class="metric-label">Total Crawls</div>
+                            <div class="metric-value" id="total-crawls">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Last Results</div>
+                            <div class="metric-value" id="last-results">-</div>
+                        </div>
+                    </div>
+                    <div id="domain-list" style="margin-top: 15px;"></div>
+                </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="panel grid-full">
+                <div class="panel-header">
+                    <h3>System Controls</h3>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn" onclick="triggerCrawl()">Trigger Manual Crawl</button>
+                    <button class="btn btn-secondary" id="scheduler-toggle" onclick="toggleScheduler()">Toggle Scheduler</button>
+                    <button class="btn btn-secondary" onclick="showReports()">View Reports</button>
+                    <button class="btn btn-secondary" onclick="showConfig()">Configuration</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MVNO Trends (Hidden by default) -->
+        <div id="trends-panel" class="panel" style="display: none;">
+            <div class="panel-header">
+                <h3>MVNO Trends: <span id="trend-mvno-name"></span></h3>
+                <button class="btn btn-small" onclick="hideTrends()">Close</button>
+            </div>
+            <div id="trends-content">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container"></div>
+
+    <script>
+        // Configuration
+        const API_BASE = '/api';
+        let refreshInterval;
+        let currentMVNO = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('GHOST Dashboard initialized');
+            refreshAll();
+
+            // Auto-refresh every 30 seconds
+            refreshInterval = setInterval(() => {
+                loadSystemStatus();
+                loadTopMVNOs();
+            }, 30000);
+        });
+
+        // Utility Functions
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+
+            const container = document.getElementById('notification-container');
+            container.appendChild(notification);
+
+            setTimeout(() => {
+                notification.remove();
+            }, 5000);
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'Unknown';
+            const date = new Date(timestamp);
+            return date.toLocaleString();
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // API Functions
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error(`API call failed: ${endpoint}`, error);
+                showNotification(`Failed to fetch data: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        // Load Functions
+        async function loadSystemStatus() {
+            try {
+                const data = await apiCall('/status');
+
+                document.getElementById('status-text').textContent = data.status;
+                document.getElementById('api-mode-text').textContent = data.api_mode;
+                document.getElementById('last-crawl').textContent = data.last_crawl;
+                document.getElementById('last-parse').textContent = data.last_parse;
+                document.getElementById('disk-usage').textContent = data.metrics.disk_usage;
+                document.getElementById('scheduler-status').textContent =
+                    data.scheduler_enabled ? 'ENABLED' : 'DISABLED';
+                document.getElementById('update-time').textContent =
+                    new Date().toLocaleTimeString();
+
+                // Update scheduler button
+                const schedulerBtn = document.getElementById('scheduler-toggle');
+                schedulerBtn.textContent = data.scheduler_enabled ?
+                    'Disable Scheduler' : 'Enable Scheduler';
+
+                // Update status indicator
+                const indicator = document.querySelector('.status-indicator');
+                indicator.className = `status-indicator status-${data.status === 'OPERATIONAL' ? 'ok' : 'error'}`;
+
+            } catch (error) {
+                console.error('Failed to load system status:', error);
+            }
+        }
+
+        async function loadTopMVNOs() {
+            try {
+                const data = await apiCall('/mvnos/top/10');
+                const list = document.getElementById('mvno-list');
+
+                if (data.mvnos.length === 0) {
+                    list.innerHTML = '<li style="text-align: center; padding: 20px;">No data available</li>';
+                    return;
+                }
+
+                list.innerHTML = data.mvnos.map(mvno => `
+                    <li class="mvno-item" onclick="showMVNOTrends('${mvno.name}')">
+                        <div>
+                            <span class="mvno-name">${mvno.name}</span>
+                            <span class="mvno-trend trend-${mvno.trend}">
+                                ${mvno.trend === 'rising' ? '↑' : mvno.trend === 'falling' ? '↓' : '→'}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="mvno-score">${mvno.score.toFixed(2)}</span>
+                            <span style="font-size: 0.8em; color: var(--text-secondary);">
+                                (${mvno.mentions} mentions)
+                            </span>
+                        </div>
+                    </li>
+                `).join('');
+
+            } catch (error) {
+                document.getElementById('mvno-list').innerHTML =
+                    '<li style="text-align: center; padding: 20px;">Error loading data</li>';
+            }
+        }
+
+        async function loadAlerts() {
+            try {
+                const filterType = document.getElementById('alert-filter').value;
+                const endpoint = filterType ?
+                    `/alerts/recent?type=${filterType}` : '/alerts/recent';
+
+                const data = await apiCall(endpoint);
+                const container = document.getElementById('alerts-container');
+
+                if (data.alerts.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 20px;">No recent alerts</div>';
+                    return;
+                }
+
+                container.innerHTML = data.alerts.map(alert => `
+                    <div class="alert-item alert-type-${alert.alert_type}">
+                        <div class="alert-header">
+                            <span class="alert-type">${alert.alert_type}</span>
+                            <span class="alert-time">${formatTimestamp(alert.timestamp)}</span>
+                        </div>
+                        <div><strong>${alert.mvno_name}</strong></div>
+                        <div style="font-size: 0.9em; margin-top: 5px;">${alert.message}</div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                document.getElementById('alerts-container').innerHTML =
+                    '<div style="text-align: center; padding: 20px;">Error loading alerts</div>';
+            }
+        }
+
+        async function loadCrawlerStatus() {
+            try {
+                const data = await apiCall('/crawler/status');
+
+                document.getElementById('total-crawls').textContent = data.total_crawls;
+                document.getElementById('last-results').textContent =
+                    data.last_crawl ? data.last_crawl.results_count : '0';
+
+                if (data.last_crawl && data.last_crawl.domains) {
+                    const domainList = Object.entries(data.last_crawl.domains)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5)
+                        .map(([domain, count]) =>
+                            `<div style="display: flex; justify-content: space-between; padding: 5px 0;">
+                                <span>${domain}</span>
+                                <span>${count} results</span>
+                            </div>`
+                        ).join('');
+
+                    document.getElementById('domain-list').innerHTML =
+                        `<div style="font-size: 0.9em;"><strong>Top Domains:</strong>${domainList}</div>`;
+                }
+
+            } catch (error) {
+                console.error('Failed to load crawler status:', error);
+            }
+        }
+
+        // MVNO Functions
+        async function showMVNOTrends(mvnoName) {
+            currentMVNO = mvnoName;
+            document.getElementById('trend-mvno-name').textContent = mvnoName;
+            document.getElementById('trends-panel').style.display = 'block';
+
+            try {
+                const data = await apiCall(`/trends/${encodeURIComponent(mvnoName)}`);
+                const content = document.getElementById('trends-content');
+
+                content.innerHTML = `
+                    <div class="metric-grid" style="margin-bottom: 20px;">
+                        <div class="metric">
+                            <div class="metric-label">Current Score</div>
+                            <div class="metric-value">${data.statistics.current.toFixed(2)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Average (30d)</div>
+                            <div class="metric-value">${data.statistics.average.toFixed(2)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Min/Max</div>
+                            <div class="metric-value">${data.statistics.min.toFixed(1)} - ${data.statistics.max.toFixed(1)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Trend</div>
+                            <div class="metric-value trend-${data.statistics.trend}">
+                                ${data.statistics.trend.toUpperCase()}
+                            </div>
+                        </div>
+                    </div>
+
+                    ${data.significant_changes.length > 0 ? `
+                        <h4 style="margin-bottom: 10px;">Significant Changes:</h4>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            ${data.significant_changes.map(change => `
+                                <div style="padding: 8px; border-bottom: 1px solid var(--border);">
+                                    <span>${formatTimestamp(change.date)}</span>:
+                                    <span style="color: ${change.change > 0 ? 'var(--primary)' : 'var(--danger)'}">
+                                        ${change.from.toFixed(1)} → ${change.to.toFixed(1)}
+                                        (${change.change > 0 ? '+' : ''}${change.change.toFixed(1)})
+                                    </span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p>No significant changes detected in the past 30 days.</p>'}
+                `;
+
+            } catch (error) {
+                document.getElementById('trends-content').innerHTML =
+                    '<div style="text-align: center; padding: 20px;">Error loading trends</div>';
+            }
+        }
+
+        function hideTrends() {
+            document.getElementById('trends-panel').style.display = 'none';
+            currentMVNO = null;
+        }
+
+        function showMVNOSearch() {
+            const modalBody = document.getElementById('modal-body');
+            modalBody.innerHTML = `
+                <h3>Search MVNOs</h3>
+                <div class="search-container">
+                    <input type="text" id="mvno-search-input" class="search-input"
+                           placeholder="Enter MVNO name..." onkeyup="searchMVNOs(event)">
+                </div>
+                <div id="search-results" style="max-height: 400px; overflow-y: auto;"></div>
+            `;
+            openModal();
+            document.getElementById('mvno-search-input').focus();
+        }
+
+        async function searchMVNOs(event) {
+            if (event.key === 'Enter' || event.type === 'click') {
+                const query = document.getElementById('mvno-search-input').value;
+                if (query.length < 2) return;
+
+                try {
+                    const data = await apiCall(`/mvnos/search/${encodeURIComponent(query)}`);
+                    const resultsDiv = document.getElementById('search-results');
+
+                    if (data.results.length === 0) {
+                        resultsDiv.innerHTML = '<p>No results found</p>';
+                        return;
+                    }
+
+                    resultsDiv.innerHTML = data.results.map(mvno => `
+                        <div class="mvno-item" onclick="closeModal(); showMVNOTrends('${mvno.name}')">
+                            <span class="mvno-name">${mvno.name}</span>
+                            <span class="mvno-score">${mvno.score.toFixed(2)}</span>
+                        </div>
+                    `).join('');
+
+                } catch (error) {
+                    document.getElementById('search-results').innerHTML =
+                        '<p>Search failed</p>';
+                }
+            }
+        }
+
+        // Control Functions
+        async function triggerCrawl() {
+            if (!confirm('Start a new crawl cycle? This may take several minutes.')) return;
+
+            try {
+                const data = await apiCall('/crawler/trigger', { method: 'POST' });
+                showNotification(data.message, 'success');
+            } catch (error) {
+                showNotification('Failed to trigger crawl', 'error');
+            }
+        }
+
+        async function toggleScheduler() {
+            try {
+                const data = await apiCall('/scheduler/toggle', { method: 'POST' });
+                showNotification(data.message, 'success');
+                loadSystemStatus(); // Refresh status
+            } catch (error) {
+                showNotification('Failed to toggle scheduler', 'error');
+            }
+        }
+
+        // Modal Functions
+        async function showDiskUsage() {
+            try {
+                const data = await apiCall('/disk-usage');
+                const modalBody = document.getElementById('modal-body');
+
+                modalBody.innerHTML = `
+                    <h3>Disk Usage Statistics</h3>
+                    <div class="metric-grid" style="margin-top: 20px;">
+                        <div class="metric">
+                            <div class="metric-label">Total Space</div>
+                            <div class="metric-value">${data.filesystem.human_readable.total}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Used Space</div>
+                            <div class="metric-value">${data.filesystem.human_readable.used}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Free Space</div>
+                            <div class="metric-value">${data.filesystem.human_readable.free}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Usage</div>
+                            <div class="metric-value">${data.filesystem.percent_used}%</div>
+                        </div>
+                    </div>
+                    <h4 style="margin-top: 20px;">Project Usage:</h4>
+                    <p>Project Size: ${data.project.human_readable}</p>
+                    <p>Data Directory: ${data.data_directory.human_readable}</p>
+                `;
+
+                openModal();
+            } catch (error) {
+                showNotification('Failed to load disk usage', 'error');
+            }
+        }
+
+        async function showLogs() {
+            try {
+                const data = await apiCall('/system/logs?lines=50');
+                const modalBody = document.getElementById('modal-body');
+
+                modalBody.innerHTML = `
+                    <h3>System Logs - ${data.log_file}</h3>
+                    <div class="log-viewer">${data.lines.join('')}</div>
+                    <p style="margin-top: 10px;">Showing last 50 of ${data.total_lines} lines</p>
+                `;
+
+                openModal();
+            } catch (error) {
+                showNotification('Failed to load logs', 'error');
+            }
+        }
+
+        async function showReports() {
+            try {
+                const data = await apiCall('/reports/list');
+                const modalBody = document.getElementById('modal-body');
+
+                modalBody.innerHTML = `
+                    <h3>Available Reports</h3>
+                    ${data.reports.length === 0 ? '<p>No reports available</p>' : `
+                        <div style="margin-top: 20px;">
+                            ${data.reports.map(report => `
+                                <div class="mvno-item">
+                                    <div>
+                                        <div>${report.filename}</div>
+                                        <div style="font-size: 0.8em; color: var(--text-secondary);">
+                                            ${formatTimestamp(report.created)} - ${formatFileSize(report.size)}
+                                        </div>
+                                    </div>
+                                    <button class="btn btn-small" onclick="downloadReport('${report.filename}')">
+                                        Download
+                                    </button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                `;
+
+                openModal();
+            } catch (error) {
+                showNotification('Failed to load reports', 'error');
+            }
+        }
+
+        async function showConfig() {
+            try {
+                const data = await apiCall('/config');
+                const modalBody = document.getElementById('modal-body');
+
+                modalBody.innerHTML = `
+                    <h3>System Configuration</h3>
+                    <div style="margin-top: 20px;">
+                        <pre style="background: #000; padding: 15px; border-radius: 4px; overflow-x: auto;">
+${JSON.stringify(data, null, 2)}
+                        </pre>
+                    </div>
+                `;
+
+                openModal();
+            } catch (error) {
+                showNotification('Failed to load configuration', 'error');
+            }
+        }
+
+        function downloadReport(filename) {
+            // In a real implementation, this would trigger a download
+            showNotification(`Download started: ${filename}`, 'info');
+        }
+
+        // Modal Management
+        function openModal() {
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        // Close modal on outside click
+        window.onclick = function(event) {
+            const modal = document.getElementById('modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // Refresh All
+        function refreshAll() {
+            console.log('Refreshing all data...');
+            loadSystemStatus();
+            loadTopMVNOs();
+            loadAlerts();
+            loadCrawlerStatus();
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                hideTrends();
+            } else if (e.key === 'r' && e.ctrlKey) {
+                e.preventDefault();
+                refreshAll();
+            }
+        });
+    </script>
+</body>
+</html>
