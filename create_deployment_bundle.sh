@@ -289,7 +289,7 @@ async def test_system_status(client):
     await client.connect()
     result = await client.query("get_system_status", {}) # Generic query
     assert "result" in result, "Result key missing"
-    assert "server_uptime" in result["result"], "System status missing uptime"
+    assert "server_ uptime" in result["result"], "System status missing uptime"
     await client.close()
 
 async def test_health_check_endpoint(_): # Param is placeholder
@@ -304,6 +304,77 @@ async def test_health_check_endpoint(_): # Param is placeholder
 if __name__ == "__main__":
     asyncio.run(run_tests())
 TEST
+
+# Add NLP module to bundle
+cp ghost_mcp_nlp.py $BUNDLE_DIR/ 2>/dev/null || echo "Warning: ghost_mcp_nlp.py not found"
+
+# Update test suite to include NLP
+cat >> $BUNDLE_DIR/test_mcp_complete.py << 'NLPTEST'
+
+async def test_nlp_queries(client):
+    """Test natural language processing"""
+    print("\n=== Testing NLP Queries ===")
+
+    # Import NLP processor
+    try:
+        from ghost_mcp_nlp import GhostNLPProcessor
+        nlp = GhostNLPProcessor()
+    except ImportError:
+        print("⚠️  NLP module not available")
+        return
+
+    test_queries = [
+        "Which carriers don't check ID?",
+        "Tell me about Mint Mobile",
+        "Recent changes",
+    ]
+
+    for query in test_queries:
+        method, params = nlp.parse_query(query)
+        print(f"\nQuery: '{query}'")
+        print(f"  Parsed as: {method}({params})")
+
+        # Test actual query
+        await client.connect() # Ensure client is connected for each query
+        result = await client.query(method, params)
+
+        # Format response
+        formatted = nlp.format_response(method, result.get("result", {}))
+        print(f"  Response preview: {formatted[:100]}...")
+
+        await client.close() # Close client after each query
+NLPTEST
+
+# Add NLP usage to instructions
+cat >> $BUNDLE_DIR/DEPLOY_INSTRUCTIONS.md << 'NLPINST'
+
+## Natural Language Interface
+
+The MCP server includes an NLP layer for natural language queries:
+
+```python
+from ghost_mcp_nlp import GhostNLPProcessor, NLPEnhancedMCPServer
+
+# Assuming 'mcp_server' is your initialized GhostMCPServerV2 instance
+# Wrap your MCP server with NLP
+nlp_server = NLPEnhancedMCPServer(mcp_server)
+
+# Handle natural language (example usage in a client or integrated component)
+# async def handle_query(query_text):
+#     result = await nlp_server.handle_natural_language(query_text)
+#     print(result["formatted_response"])
+
+# Example:
+# asyncio.run(handle_query("Which carriers don't need ID?"))
+```
+
+### Example Natural Language Queries
+- "Which carriers don't require ID?"
+- "Check Mint Mobile policy"
+- "What changed recently?"
+- "Show Cricket trends for 2 weeks"
+- "Is the system working?"
+NLPINST
 
 # Create tar.gz bundle
 # Using GNU tar options for compatibility.
