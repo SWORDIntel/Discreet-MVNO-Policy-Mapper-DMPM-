@@ -1,0 +1,4 @@
+PDF Generation Skipped - ReportLab Missing
+
+MVNO: Visible Example, Score: 0.6666666666666666
+MVNO: US Mobile Example, Score: -0.5333333333333333

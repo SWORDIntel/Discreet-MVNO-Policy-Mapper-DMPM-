@@ -8,6 +8,7 @@ import sys # For directory creation diagnostic
 import traceback # For exception capture
 import time # For timestamps and success marker
 import json # For loading parsed data for DB
+import logging # Import for explicit top-level exception logging
 
 # Marker: Imports complete (basic os, shutil, sys, traceback, time, json)
 with open('imports_base_complete.marker', 'w') as f_marker:
@@ -99,8 +100,12 @@ if __name__ == '__main__':
             shutil.rmtree(output_dir_name)
         os.makedirs(output_dir_name, exist_ok=True)
 
-        main_config_file = os.path.join(output_dir_name, "main_app_config.json")
-        main_secret_key = os.path.join(output_dir_name, "main_app_secret.key")
+        # Use the root config and key files directly to ensure consistency with configure_api.py
+        main_config_file = "config.json" # Root config file
+        main_secret_key = "secret.key"   # Root secret key
+        print(f"DEBUG: main.py will use ROOT config file: {os.path.abspath(main_config_file)}")
+        print(f"DEBUG: main.py will use ROOT secret key: {os.path.abspath(main_secret_key)}")
+
 
         # Create dummy mvnos.txt and keywords.txt for the test if real ones don't exist
         # These will be used by the crawler.
@@ -117,11 +122,30 @@ if __name__ == '__main__':
 
 
         config_manager = GhostConfig(config_file=main_config_file, key_file=main_secret_key)
+        # Preserve API key and CX ID if they are already set by a master configuration script
+        # (e.g., configure_api.py via copied config)
+        # Only set test/mock values if they are not present.
+        if not config_manager.get_api_key("google_search"):
+            config_manager.set_api_key("google_search", "MAIN_FULL_TEST_MOCK_API_KEY")
+            print("DEBUG: main.py set MOCK API key because none was found in loaded config.")
+        else:
+            print(f"DEBUG: main.py RETAINED API key from loaded config: {config_manager.get_api_key('google_search')}")
+
+        if config_manager.get("google_programmable_search_engine_id") == "YOUR_CX_ID" or not config_manager.get("google_programmable_search_engine_id"):
+            # If it's the default placeholder or not set, allow main.py to potentially set one,
+            # but ideally it should come from the copied config.
+            # For this test, we rely on the copied config. If it wasn't copied or was default,
+            # then the test crawler might fail if it needs a specific one.
+            # The key part is not overwriting a valid one.
+            # We will ensure the copied config has the correct CX ID.
+            # If configure_api.py set it, it should be in main_app_config.json.
+            print(f"DEBUG: main.py initial CX ID from loaded config: {config_manager.get('google_programmable_search_engine_id')}")
+            # No explicit set here for CX_ID to ensure it uses the one from copied config.
+
         config_manager.set("app_name", "GhostDMPM_MainFullTest")
         config_manager.set("output_dir", output_dir_name) # Set the main output dir
         config_manager.set("log_file", os.path.join(output_dir_name, "ghost_main_full_test.log"))
         config_manager.set("search_delay_seconds", 0.05) # Faster for tests
-        config_manager.set_api_key("google_search", "MAIN_FULL_TEST_MOCK_API_KEY")
         config_manager.set("mvno_list_file", mvnos_file_main) # Use the test-specific mvnos file
         config_manager.set("keywords_file", keywords_file_main) # Use the test-specific keywords
         # config_manager.set("ENCRYPTION_MODE", "mock") # Optionally force mock for testing

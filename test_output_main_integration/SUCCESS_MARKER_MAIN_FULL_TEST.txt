@@ -1,0 +1,10 @@
+Main.py full integration test completed successfully at 20250702-235702
+Effective Encryption Mode: fernet
+Database Active: True
+Change Detection Tested: True
+Run 1 Parsed Results: test_output_main_integration/parsed_mvno_data_20250702-235658.json
+Run 1 Encrypted Report: test_output_main_integration/reports/main_test_report_run1_20250702-235658.json.enc
+Run 2 Parsed Results: test_output_main_integration/parsed_mvno_data_20250702-235702.json
+Run 2 Encrypted Report: test_output_main_integration/reports/main_test_report_run2_20250702-235702.json.enc
+Database file: test_output_main_integration/database_files/ghost_dmpm_database.json
+History file: test_output_main_integration/database_files/ghost_dmpm_history.json
