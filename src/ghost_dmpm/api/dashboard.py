@@ -45,7 +45,7 @@ users = {
 stats_cache = {
     'last_update': None,
     'data': {},
-    'cache_duration': 30  # seconds
+    'cache_duration': None  # Will be set from config in initialize_app_components
 }
 
 @auth.verify_password
@@ -125,8 +125,9 @@ def _calculate_trend(mvno_name):
             return "falling"
         else:
             return "stable"
-    except:
-        return "stable"
+    except Exception as e:
+        logger.error(f"Error calculating trend for {mvno_name}: {e}")
+        return "unknown" # Or "stable" if preferred as a safe default
 
 def _get_system_metrics():
     """Get comprehensive system metrics"""
@@ -170,17 +171,36 @@ def _get_system_metrics():
     return metrics
 
 # Cache decorator
-def cached(seconds=30):
+def cached(seconds=None): # Default to None
     def decorator(f):
-        cache = {'time': None, 'value': None}
+        # Each decorated function gets its own cache and effective_seconds
+        func_cache = {'time': None, 'value': None}
+
+        # Determine effective_seconds once when decorator is applied
+        # It will use the global stats_cache['cache_duration'] if seconds is None
+        # This means stats_cache['cache_duration'] must be set before routes are decorated.
+        # This is handled by initialize_app_components() being called before app.run().
+        effective_seconds = seconds
 
         @wraps(f)
         def wrapper(*args, **kwargs):
+            nonlocal effective_seconds # Allow modification if we want to refresh it dynamically, but not needed here.
+
+            # If effective_seconds wasn't set at decoration time (e.g. because config wasn't ready)
+            # or if it was explicitly None to always use global, try to get it.
+            current_cache_duration_setting = effective_seconds
+            if current_cache_duration_setting is None:
+                 # Fallback to global config if decorator was called with cached(None)
+                current_cache_duration_setting = stats_cache.get('cache_duration')
+                if current_cache_duration_setting is None: # If global is also None, default to a value
+                    logger.warning(f"Cache duration for {f.__name__} not set, defaulting to 30s.")
+                    current_cache_duration_setting = 30
+
             now = time.time()
-            if cache['time'] is None or now - cache['time'] > seconds:
-                cache['value'] = f(*args, **kwargs)
-                cache['time'] = now
-            return cache['value']
+            if func_cache['time'] is None or now - func_cache['time'] > current_cache_duration_setting:
+                func_cache['value'] = f(*args, **kwargs)
+                func_cache['time'] = now
+            return func_cache['value']
         return wrapper
     return decorator
 
@@ -216,6 +236,8 @@ def system_status():
         scheduler_status = 'Not Found'
 
 
+    from ghost_dmpm import __version__ as app_version
+
     return jsonify({
         'status': 'OPERATIONAL',
         'timestamp': datetime.now().isoformat(),
@@ -227,14 +249,17 @@ def system_status():
         'scheduler_enabled': config.get('scheduler.enabled', False) if config else False,
         'metrics': metrics,
         'data_directory': str(_get_data_dir_path()),
-        'version': '1.0.0' # TODO: Get from __version__
+        'version': app_version
     })
 
 @app.route('/api/mvnos/top/<int:n>')
 @auth.login_required
-@cached(60)
+@cached(None) # Cache duration will be set from config
 def top_mvnos(n=10):
     """Get top N lenient MVNOs with detailed info"""
+    if not isinstance(n, int) or not 1 <= n <= config.get('dashboard.max_top_mvnos', 100):
+        return jsonify({'error': f"Invalid value for n. Must be an integer between 1 and {config.get('dashboard.max_top_mvnos', 100)}."}), 400
+
     latest_parsed = _get_latest_file('parsed_mvno_data_*.json')
     if not latest_parsed:
         return jsonify({'error': 'No data available', 'suggestion': 'Run crawler first'}), 404
@@ -311,6 +336,11 @@ def recent_alerts():
     days = request.args.get('days', 7, type=int)
     alert_type = request.args.get('type', None)
 
+    if not isinstance(days, int) or days <= 0:
+        return jsonify({'error': 'Invalid value for days. Must be a positive integer.'}), 400
+    if alert_type is not None and not isinstance(alert_type, str):
+        return jsonify({'error': 'Invalid value for type. Must be a string.'}), 400
+
     alerts_file = _get_data_dir_path() / 'alerts_log.json' # Path object
     if not alerts_file.exists():
         return jsonify({'alerts': [], 'total': 0})
@@ -350,6 +380,10 @@ def mvno_trends(mvno):
         return jsonify({'error': 'Database not available'}), 503
 
     days = request.args.get('days', 30, type=int)
+    if not isinstance(days, int) or days <= 0:
+        return jsonify({'error': 'Invalid value for days. Must be a positive integer.'}), 400
+    if not mvno or not isinstance(mvno, str): # Basic check for mvno path variable
+        return jsonify({'error': 'Invalid MVNO name.'}), 400
 
     try:
         historical_data = db.get_historical_trends(mvno, days=days)
@@ -433,6 +467,8 @@ def list_reports():
 def system_logs():
     """Get recent system logs"""
     lines = request.args.get('lines', 100, type=int)
+    if not isinstance(lines, int) or lines <= 0:
+        return jsonify({'error': 'Invalid value for lines. Must be a positive integer.'}), 400
 
     # Assuming logs are in project_root/logs as per GhostConfig changes
     log_dir_path = config.project_root / config.get("logging.directory", "logs") if config else Path("logs")
@@ -600,13 +636,24 @@ def disk_usage():
 @auth.login_required
 def trigger_crawl():
     """Manually trigger a crawl cycle"""
+    # TODO: Implement actual crawl triggering mechanism.
+    # This should ideally interact with the scheduler or a dedicated crawl manager.
+    # For example, it might add a one-time job to the scheduler,
+    # or send a message to a running crawler process if one exists.
+    # Consider security implications if this can be triggered rapidly.
+    logger.info("Manual crawl trigger requested via API.")
     try:
-        # This would normally trigger the crawler
-        # For now, return a mock response
+        # Placeholder for actual triggering logic
+        # e.g., subprocess.Popen(['python', 'main.py', '--force-crawl'])
+        # or if using a job queue: queue.put('trigger_crawl_now')
+        message = "Crawl cycle initiated (simulated - actual implementation pending)."
+        if config:
+            message = config.get("dashboard.messages.crawl_triggered", message)
+
         return jsonify({
             'status': 'triggered',
-            'message': 'Crawl cycle initiated',
-            'estimated_completion': '5-10 minutes'
+            'message': message,
+            'estimated_completion': config.get("dashboard.crawl_estimate_minutes", "5-10") + " minutes"
         })
     except Exception as e:
         logger.error(f"Error triggering crawl: {e}")
@@ -659,29 +706,28 @@ def initialize_app_components():
         from ghost_dmpm.core.config import GhostConfig
         from ghost_dmpm.core.database import GhostDatabase
 
-        # project_root for GhostConfig will be auto-determined if not passed.
-        # For Flask template_folder, we need project_root explicitly.
-        # Let's determine project_root once.
-        # A simple way for a module in src/ghost_dmpm/api to find project root:
-        # Assuming this file is src/ghost_dmpm/api/dashboard.py
-        # project_root_path = Path(__file__).resolve().parent.parent.parent
-        # However, GhostConfig already does this, so we can instantiate it first.
+        config = GhostConfig()
 
-        config = GhostConfig() # Auto-determines project_root
-
-        # Initialize Flask app with correct template folder
-        # template_folder should be project_root/templates
         template_folder_abs = config.project_root / "templates"
-        # static_folder_abs = config.project_root / "static" # If you have a root static folder
-
         app = Flask(__name__, template_folder=str(template_folder_abs))
         app.config['SECRET_KEY'] = os.environ.get('GHOST_SECRET_KEY', config.get('dashboard.secret_key', 'ghost-protocol-2024-default-key'))
 
-        if db is None and config.get("database.path"): # Initialize db if path is configured
+        # Initialize cache duration from config
+        global stats_cache
+        stats_cache['cache_duration'] = config.get('dashboard.cache_duration_seconds', 30)
+
+        # Initialize @cached decorator with configured duration for top_mvnos
+        # This requires re-registering the route or modifying the decorator itself.
+        # Simpler: ensure @cached uses stats_cache['cache_duration'] if its arg is None.
+        # The decorator `cached` needs to be modified to use this global if its arg is None.
+        # For now, we assume the @cached(None) will pick up the global or we adjust it.
+        # Let's modify the `cached` decorator to use the global if no specific duration is passed.
+
+        if db is None and config.get("database.path"):
             db = GhostDatabase(config)
 
         logger = config.get_logger("GhostDashboard")
-        logger.info("Dashboard components initialized.")
+        logger.info(f"Dashboard components initialized. Cache duration set to {stats_cache['cache_duration']}s.")
 
     except ImportError as e:
         # Fallback for minimal deployment or if core components are missing

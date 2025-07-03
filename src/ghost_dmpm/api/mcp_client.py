@@ -139,4 +139,37 @@ async def test_mcp_connection():
 if __name__ == "__main__":
     # Run test
     print("Attempting to connect to MCP server and run tests...")
-    asyncio.run(test_mcp_connection())
+    import argparse
+
+    parser = argparse.ArgumentParser(description="GHOST DMPM MCP Client")
+    parser.add_argument("--method", type=str, required=True, help="Method to call on MCP server")
+    parser.add_argument("--params", type=json.loads, default={}, help="JSON string of parameters for the method")
+    # Use the token from the actual live config for consistency in demo
+    parser.add_argument("--token", type=str, default="ghost-mcp-secret-token", help="Authentication token")
+    parser.add_argument("--url", type=str, default="ws://localhost:8765", help="MCP Server URL")
+
+    args = parser.parse_args()
+
+    async def main_cli(args):
+        client = GhostMCPClient(url=args.url, token=args.token)
+        try:
+            if not await client.connect():
+                print(f"Failed to connect and authenticate with token: {args.token[:10]}...")
+                return
+
+            print(f"\n[*] Calling method: {args.method} with params: {args.params}")
+            result = await client.query(args.method, args.params)
+            print(json.dumps(result, indent=2))
+
+        except Exception as e:
+            print(f"[✗] Error during CLI execution: {e}")
+        finally:
+            if client.websocket and client.websocket.state == State.OPEN:
+                await client.close()
+
+    if args.method:
+        asyncio.run(main_cli(args))
+    else:
+        # Fallback to test connection if no method specified, though `method` is required by argparse
+        print("Attempting to connect to MCP server and run default tests...")
+        asyncio.run(test_mcp_connection()) # test_mcp_connection would need token adjustment too
