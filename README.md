@@ -549,6 +549,32 @@ The GHOST DMPM system is composed of several core Python modules:
     *   `/api/health` (no auth): Simple health check endpoint.
     *   *(Refer to `ghost_dashboard.py` for the most up-to-date list of endpoints and their exact behavior.)*
 
+### `ghost_mcp_server.py`
+
+*   **Purpose**: Provides a WebSocket-based Model Context Protocol (MCP) server for AI assistant integration.
+*   **Key Functionalities**:
+    *   Listens on `ws://localhost:8765` (configurable).
+    *   Requires authentication using a token (`ghost-mcp-2024` by default).
+    *   Handles JSON-RPC like messages for various methods:
+        *   `authenticate`: Client authenticates with the server.
+        *   `get_top_mvnos(n)`: Get top N anonymous carriers.
+        *   `search_mvno(name)`: Search for a specific MVNO.
+        *   `get_recent_alerts(days)`: Get recent policy changes.
+        *   `get_mvno_trend(name, days)`: Get historical policy trend for an MVNO.
+        *   `get_system_status()`: Get overall system health and statistics.
+    *   Interacts with `ghost_db.py` to fulfill data requests.
+    *   Logs client connections and requests.
+
+### `mcp_client.py`
+
+*   **Purpose**: A simple Python client to interact with the `ghost_mcp_server.py`.
+*   **Key Functionalities**:
+    *   Connects to the MCP server and handles authentication.
+    *   Provides methods to easily call the server's MCP functions (e.g., `get_top_mvnos()`, `search_mvno()`).
+    *   Includes a basic test function to verify server connectivity and simple queries.
+    *   Can be used as a command-line tool for testing or as a library for other tools to integrate with the MCP server.
+
+
 ### `ghost_scheduler.py`
 
 *   **Purpose**: Manages scheduled execution of the main GHOST DMPM intelligence cycle.
@@ -1082,3 +1108,48 @@ Alternatively, if no `LICENSE` file is present or a different license is intende
 This project is proprietary and confidential. All rights reserved.
 Contact the project maintainers for licensing information.
 (Choose one of the above, or specify the correct license if known)
+
+---
+
+## MCP Server Interface
+
+The GHOST DMPM includes a Model Context Protocol (MCP) server for AI assistant integration.
+
+### Quick Start
+
+```bash
+# Start MCP server (ensure it's defined in your docker-compose.yml)
+# Example: docker-compose up -d ghost-mcp-server
+# Or run directly if not using Docker: python ghost_mcp_server.py
+
+# Test connection using the client
+python3 mcp_client.py
+```
+
+### For AI Assistants
+
+Connect to `ws://localhost:8765` (default URL) with token `ghost-mcp-2024` (default token).
+
+Available methods (send as JSON message over WebSocket):
+
+*   **`authenticate`**:
+    *   Params: `{"token": "your_auth_token"}`
+    *   Authenticates the client session. Must be called first.
+*   **`get_top_mvnos`**:
+    *   Params: `{"n": 10}` (optional, `n` defaults to 10)
+    *   Gets the top N most lenient MVNOs.
+*   **`search_mvno`**:
+    *   Params: `{"mvno_name": "NameOfMVNO"}`
+    *   Searches for details of a specific MVNO.
+*   **`get_recent_alerts`**:
+    *   Params: `{"days": 7}` (optional, `days` defaults to 7)
+    *   Gets policy changes and alerts from the last N days.
+*   **`get_mvno_trend`**:
+    *   Params: `{"mvno_name": "NameOfMVNO", "days": 30}` (optional, `days` defaults to 30)
+    *   Gets the historical leniency score trend for an MVNO.
+*   **`get_system_status`**:
+    *   Params: None
+    *   Gets the current operational status and statistics of the GHOST system.
+
+See [MCP_QUICKSTART.md](MCP_QUICKSTART.md) for detailed message examples and expected responses.
+The `mcp_client.py` also serves as a reference implementation for interacting with these methods.

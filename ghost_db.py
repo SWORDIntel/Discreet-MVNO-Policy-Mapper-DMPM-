@@ -155,3 +155,54 @@ class GhostDatabase:
                 (datetime.now(), stats.get('mvnos_found', 0), stats.get('new_policies', 0),
                  stats.get('changes_detected', 0), stats.get('errors', 0), stats.get('duration', 0))
             )
+
+    def get_mvno_by_name(self, mvno_name):
+        """Get the latest policy details for a specific MVNO by name."""
+        self.logger.debug(f"Querying for MVNO: {mvno_name}")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                '''SELECT mvno_name, policy_snapshot, leniency_score, crawl_timestamp, source_url
+                   FROM mvno_policies
+                   WHERE mvno_name = ?
+                   ORDER BY crawl_timestamp DESC
+                   LIMIT 1''',
+                (mvno_name,)
+            ).fetchone()
+
+    def get_mvno_policy_history(self, mvno_name, days):
+        """Get policy history for a specific MVNO over the last 'days'."""
+        self.logger.debug(f"Querying policy history for {mvno_name} over {days} days")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                '''SELECT mvno_name, policy_snapshot, leniency_score, crawl_timestamp, source_url
+                   FROM mvno_policies
+                   WHERE mvno_name = ? AND crawl_timestamp >= datetime('now', '-' || ? || ' days')
+                   ORDER BY crawl_timestamp DESC''',
+                (mvno_name, str(days))
+            ).fetchall()
+
+    def get_database_stats(self):
+        """Get various statistics from the database."""
+        self.logger.debug("Querying database statistics")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            total_mvnos = conn.execute(
+                'SELECT COUNT(DISTINCT mvno_name) as count FROM mvno_policies'
+            ).fetchone()['count']
+
+            last_policy_update = conn.execute(
+                'SELECT MAX(crawl_timestamp) as ts FROM mvno_policies'
+            ).fetchone()['ts']
+
+            total_changes = conn.execute(
+                'SELECT COUNT(*) as count FROM policy_changes'
+            ).fetchone()['count']
+
+            return {
+                "total_mvnos": total_mvnos,
+                "last_policy_update_timestamp": last_policy_update,
+                "total_changes": total_changes
+            }
